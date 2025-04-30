@@ -152,6 +152,8 @@ extern const FuriHalNfcTechBase furi_hal_nfc_iso14443b;
 extern const FuriHalNfcTechBase furi_hal_nfc_iso15693;
 /** @brief Technology declaration for FeliCa. */
 extern const FuriHalNfcTechBase furi_hal_nfc_felica;
+/** @brief Technology declaration for LegicPrime. */
+extern const FuriHalNfcTechBase furi_hal_nfc_legic_prime;
 /* Declare new tehcnologies here. */
 
 /**

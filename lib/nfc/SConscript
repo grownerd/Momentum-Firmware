@@ -27,6 +27,7 @@ env.Append(
         File("protocols/slix/slix.h"),
         File("protocols/st25tb/st25tb.h"),
         File("protocols/felica/felica.h"),
+        File("protocols/legic_prime/legic_prime.h"),
         # Pollers
         File("protocols/iso14443_3a/iso14443_3a_poller.h"),
         File("protocols/iso14443_3b/iso14443_3b_poller.h"),
@@ -40,18 +41,21 @@ env.Append(
         File("protocols/emv/emv_poller.h"),
         File("protocols/st25tb/st25tb_poller.h"),
         File("protocols/felica/felica_poller.h"),
+        File("protocols/legic_prime/legic_prime_poller.h"),
         # Listeners
         File("protocols/iso14443_3a/iso14443_3a_listener.h"),
         File("protocols/iso14443_4a/iso14443_4a_listener.h"),
         File("protocols/mf_ultralight/mf_ultralight_listener.h"),
         File("protocols/mf_classic/mf_classic_listener.h"),
         File("protocols/felica/felica_listener.h"),
+        File("protocols/legic_prime/legic_prime_listener.h"),
         # Sync API
         File("protocols/iso14443_3a/iso14443_3a_poller_sync.h"),
         File("protocols/mf_ultralight/mf_ultralight_poller_sync.h"),
         File("protocols/mf_classic/mf_classic_poller_sync.h"),
         File("protocols/st25tb/st25tb_poller_sync.h"),
         File("protocols/felica/felica_poller_sync.h"),
+        File("protocols/legic_prime/legic_prime_poller_sync.h"),
         # Misc
         File("helpers/nfc_util.h"),
         File("helpers/iso14443_crc.h"),

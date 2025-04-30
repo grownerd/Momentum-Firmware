@@ -13,6 +13,7 @@ const FuriHalNfcTechBase* const furi_hal_nfc_tech[FuriHalNfcTechNum] = {
     [FuriHalNfcTechIso14443b] = &furi_hal_nfc_iso14443b,
     [FuriHalNfcTechIso15693] = &furi_hal_nfc_iso15693,
     [FuriHalNfcTechFelica] = &furi_hal_nfc_felica,
+    [FuriHalNfcTechLegicPrime] = &furi_hal_nfc_legic_prime,
     // Add new technologies here
 };
 

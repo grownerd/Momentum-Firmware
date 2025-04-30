@@ -106,6 +106,7 @@ typedef enum {
     NfcTechIso14443b, /**< Configure the Nfc instance to use the ISO14443-3B technology. */
     NfcTechIso15693, /**< Configure the Nfc instance to use the ISO15693 technology. */
     NfcTechFelica, /**< Configure the Nfc instance to use the FeliCa technology. */
+    NfcTechLegicPrime, /**< Configure the Nfc instance to use the Legic Prime technology. */
 
     NfcTechNum, /**< Technologies count. Internal use. */
 } NfcTech;
@@ -379,6 +380,30 @@ NfcError nfc_felica_listener_set_sensf_res_data(
  * @returns NfcErrorNone on success, any other error code on failure.
  */
 NfcError nfc_iso15693_listener_tx_sof(Nfc* instance);
+
+/******************* Legic Prime specific API *******************/
+
+/**
+ * @brief Transmit and receive a data frame in poller mode.
+ *
+ * The rx_buffer will be filled with any data received as a response to data
+ * sent from tx_buffer, with a timeout defined by the fwt parameter.
+ *
+ * The data being transmitted and received may be either bit- or byte-oriented.
+ * It shall not contain any technology-specific sequences as start or stop bits
+ * and/or other special symbols, as this is handled on the underlying HAL level.
+ *
+ * Must ONLY be used inside the callback function.
+ *
+ * @param[in,out] instance pointer to the instance to be used in the transaction.
+ * @param[in] tx_buffer pointer to the buffer containing the data to be transmitted.
+ * @param[out] rx_buffer pointer to the buffer to be filled with received data.
+ * @param[in] fwt frame wait time (response timeout), in carrier cycles.
+ * @returns NfcErrorNone on success, any other error code on failure.
+ */
+NfcError
+    nfc_legic_prime_poller_trx(Nfc* instance, const BitBuffer* tx_buffer, BitBuffer* rx_buffer, uint32_t fwt);
+
 
 #ifdef __cplusplus
 }

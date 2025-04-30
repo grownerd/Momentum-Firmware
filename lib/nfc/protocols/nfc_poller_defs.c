@@ -12,6 +12,7 @@
 #include <nfc/protocols/mf_desfire/mf_desfire_poller_defs.h>
 #include <nfc/protocols/emv/emv_poller_defs.h>
 #include <nfc/protocols/slix/slix_poller_defs.h>
+#include <nfc/protocols/legic_prime/legic_prime_poller_defs.h>
 #include <nfc/protocols/st25tb/st25tb_poller_defs.h>
 
 const NfcPollerBase* const nfc_pollers_api[NfcProtocolNum] = {
@@ -28,5 +29,6 @@ const NfcPollerBase* const nfc_pollers_api[NfcProtocolNum] = {
     [NfcProtocolSlix] = &nfc_poller_slix,
     [NfcProtocolSt25tb] = &nfc_poller_st25tb,
     [NfcProtocolEmv] = &emv_poller,
+    [NfcProtocolLegicPrime] = &nfc_poller_legic_prime,
     /* Add new pollers here */
 };

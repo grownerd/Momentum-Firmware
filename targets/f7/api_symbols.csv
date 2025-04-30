@@ -161,6 +161,10 @@ Header,+,lib/nfc/protocols/iso14443_4a/iso14443_4a_listener.h,,
 Header,+,lib/nfc/protocols/iso14443_4a/iso14443_4a_poller.h,,
 Header,+,lib/nfc/protocols/iso14443_4b/iso14443_4b.h,,
 Header,+,lib/nfc/protocols/iso14443_4b/iso14443_4b_poller.h,,
+Header,+,lib/nfc/protocols/legic_prime/legic_prime.h,,
+Header,-,lib/nfc/protocols/legic_prime/legic_prime_listener.h,,
+Header,+,lib/nfc/protocols/legic_prime/legic_prime_poller.h,,
+Header,-,lib/nfc/protocols/legic_prime/legic_prime_poller_sync.h,,
 Header,+,lib/nfc/protocols/mf_classic/mf_classic.h,,
 Header,+,lib/nfc/protocols/mf_classic/mf_classic_listener.h,,
 Header,+,lib/nfc/protocols/mf_classic/mf_classic_poller.h,,
@@ -2318,6 +2322,20 @@ Function,-,ldexp,double,"double, int"
 Function,-,ldexpf,float,"float, int"
 Function,-,ldexpl,long double,"long double, int"
 Function,-,ldiv,ldiv_t,"long, long"
+Function,+,legic_prime_alloc,LegicPrimeData*,
+Function,+,legic_prime_copy,void,"LegicPrimeData*, const LegicPrimeData*"
+Function,+,legic_prime_free,void,LegicPrimeData*
+Function,+,legic_prime_get_base_data,LegicPrimeData*,const LegicPrimeData*
+Function,+,legic_prime_get_device_name,const char*,"const LegicPrimeData*, NfcDeviceNameType"
+Function,+,legic_prime_get_uid,const uint8_t*,"const LegicPrimeData*, size_t*"
+Function,+,legic_prime_is_equal,_Bool,"const LegicPrimeData*, const LegicPrimeData*"
+Function,+,legic_prime_load,_Bool,"LegicPrimeData*, FlipperFormat*, uint32_t"
+Function,+,legic_prime_poller_activate,LegicPrimeError,"LegicPrimePoller*, LegicPrimeData*"
+Function,+,legic_prime_poller_read_blocks,LegicPrimeError,"LegicPrimePoller*, const uint8_t, const uint8_t* const, LegicPrimePollerReadCommandResponse** const"
+Function,+,legic_prime_reset,void,LegicPrimeData*
+Function,+,legic_prime_save,_Bool,"const LegicPrimeData*, FlipperFormat*"
+Function,+,legic_prime_set_uid,_Bool,"LegicPrimeData*, const uint8_t*, size_t"
+Function,+,legic_prime_verify,_Bool,"LegicPrimeData*, const FuriString*"
 Function,+,lfrfid_dict_file_load,ProtocolId,"ProtocolDict*, const char*"
 Function,+,lfrfid_dict_file_save,_Bool,"ProtocolDict*, ProtocolId, const char*"
 Function,+,lfrfid_raw_file_alloc,LFRFIDRawFile*,Storage*
@@ -2941,6 +2959,7 @@ Function,+,nfc_iso14443a_poller_trx_custom_parity,NfcError,"Nfc*, const BitBuffe
 Function,+,nfc_iso14443a_poller_trx_sdd_frame,NfcError,"Nfc*, const BitBuffer*, BitBuffer*, uint32_t"
 Function,+,nfc_iso14443a_poller_trx_short_frame,NfcError,"Nfc*, NfcIso14443aShortFrame, BitBuffer*, uint32_t"
 Function,+,nfc_iso15693_listener_tx_sof,NfcError,Nfc*
+Function,+,nfc_legic_prime_poller_trx,NfcError,"Nfc*, const BitBuffer*, BitBuffer*, uint32_t"
 Function,+,nfc_listener_alloc,NfcListener*,"Nfc*, NfcProtocol, const NfcDeviceData*"
 Function,+,nfc_listener_free,void,NfcListener*
 Function,+,nfc_listener_get_data,const NfcDeviceData*,"const NfcListener*, NfcProtocol"
@@ -4472,6 +4491,7 @@ Variable,+,message_vibro_on,const NotificationMessage,
 Variable,+,momentum_settings,MomentumSettings,
 Variable,-,nfc_device_emv,const NfcDeviceBase,
 Variable,-,nfc_device_felica,const NfcDeviceBase,
+Variable,-,nfc_device_legic_prime,const NfcDeviceBase,
 Variable,-,nfc_device_mf_classic,const NfcDeviceBase,
 Variable,-,nfc_device_mf_desfire,const NfcDeviceBase,
 Variable,-,nfc_device_mf_plus,const NfcDeviceBase,

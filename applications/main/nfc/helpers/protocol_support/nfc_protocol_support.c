@@ -115,6 +115,7 @@ const char* nfc_protocol_support_plugin_names[NfcProtocolNum] = {
     [NfcProtocolSlix] = "slix",
     [NfcProtocolSt25tb] = "st25tb",
     [NfcProtocolEmv] = "emv",
+    [NfcProtocolLegicPrime] = "legic_prime",
     /* Add new protocol support plugin names here */
 };
 

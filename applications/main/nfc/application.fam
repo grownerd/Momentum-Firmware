@@ -190,6 +190,18 @@ App(
     fal_embedded=True,
 )
 
+App(
+    appid="nfc_legic_prime",
+    targets=["f7"],
+    apptype=FlipperAppType.PLUGIN,
+    entry_point="nfc_legic_prime_ep",
+    requires=["nfc"],
+    sources=[
+        "helpers/protocol_support/legic_prime/*.c",
+    ],
+    fal_embedded=True,
+)
+
 # Parser plugins
 
 App(

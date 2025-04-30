@@ -70,6 +70,7 @@ static const FuriHalNfcTech nfc_tech_table[NfcModeNum][NfcTechNum] = {
             [NfcTechIso14443b] = FuriHalNfcTechIso14443b,
             [NfcTechIso15693] = FuriHalNfcTechIso15693,
             [NfcTechFelica] = FuriHalNfcTechFelica,
+            [NfcTechLegicPrime] = FuriHalNfcTechLegicPrime,
         },
     [NfcModeListener] =
         {
@@ -77,6 +78,7 @@ static const FuriHalNfcTech nfc_tech_table[NfcModeNum][NfcTechNum] = {
             [NfcTechIso14443b] = FuriHalNfcTechInvalid,
             [NfcTechIso15693] = FuriHalNfcTechIso15693,
             [NfcTechFelica] = FuriHalNfcTechFelica,
+            [NfcTechLegicPrime] = FuriHalNfcTechLegicPrime,
         },
 };
 
@@ -659,6 +661,57 @@ NfcError nfc_felica_listener_set_sensf_res_data(
         furi_hal_nfc_felica_listener_set_sensf_res_data(idm, idm_len, pmm, pmm_len, sys_code);
     instance->comm_state = NfcCommStateIdle;
     return nfc_process_hal_error(error);
+}
+
+NfcError
+    nfc_legic_prime_poller_trx(Nfc* instance, const BitBuffer* tx_buffer, BitBuffer* rx_buffer, uint32_t fwt) {
+    furi_check(instance);
+    furi_check(tx_buffer);
+    furi_check(rx_buffer);
+    //UNUSED(fwt);
+
+    furi_check(instance->poller_state == NfcPollerStateReady);
+
+    NfcError ret = NfcErrorNone;
+    FuriHalNfcError error = FuriHalNfcErrorNone;
+    do {
+        furi_hal_nfc_trx_reset();
+        while(furi_hal_nfc_timer_block_tx_is_running()) {
+            FuriHalNfcEvent event =
+                furi_hal_nfc_poller_wait_event(FURI_HAL_NFC_EVENT_WAIT_FOREVER);
+            if(event & FuriHalNfcEventTimerBlockTxExpired) break;
+        }
+        error =
+            furi_hal_nfc_poller_tx(bit_buffer_get_data(tx_buffer), bit_buffer_get_size(tx_buffer));
+        if(error != FuriHalNfcErrorNone) {
+            FURI_LOG_D(TAG, "Failed in poller TX");
+            ret = nfc_process_hal_error(error);
+            break;
+        }
+#if 0
+        instance->comm_state = NfcCommStateWaitTxEnd;
+        ret = nfc_poller_trx_state_machine(instance, fwt);
+        if(ret != NfcErrorNone) {
+            FURI_LOG_T(TAG, "Failed TRX state machine");
+            break;
+        }
+#else
+        furi_hal_nfc_poller_wait_event(fwt * 1000U);
+        instance->comm_state = NfcCommStateWaitRxStart;
+#endif
+
+        error = furi_hal_nfc_poller_rx(
+            instance->rx_buffer, sizeof(instance->rx_buffer), &instance->rx_bits);
+        if(error != FuriHalNfcErrorNone) {
+            FURI_LOG_D(TAG, "Failed in poller RX");
+            ret = nfc_process_hal_error(error);
+            break;
+        }
+
+        bit_buffer_copy_bits(rx_buffer, instance->rx_buffer, instance->rx_bits);
+    } while(false);
+
+    return ret;
 }
 
 #endif // FW_CFG_unit_tests
