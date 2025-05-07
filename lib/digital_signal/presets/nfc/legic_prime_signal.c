@@ -17,9 +17,9 @@
 
 #define LEGIC_PRIME_SIGNAL_T_POLLER_CHARGE      DIGITAL_SIGNAL_MS(5)
 #define LEGIC_PRIME_SIGNAL_T_POLLER_BIT_START   DIGITAL_SIGNAL_US(16)
-#define LEGIC_PRIME_SIGNAL_T_POLLER_BIT_ONE     DIGITAL_SIGNAL_US(103)
-#define LEGIC_PRIME_SIGNAL_T_POLLER_BIT_ZERO    DIGITAL_SIGNAL_US(63)
-#define LEGIC_PRIME_SIGNAL_T_POLLER_EOF         DIGITAL_SIGNAL_US(330)
+#define LEGIC_PRIME_SIGNAL_T_POLLER_BIT_ONE     DIGITAL_SIGNAL_US(85)
+#define LEGIC_PRIME_SIGNAL_T_POLLER_BIT_ZERO    DIGITAL_SIGNAL_US(45)
+#define LEGIC_PRIME_SIGNAL_T_POLLER_EOF         DIGITAL_SIGNAL_US(325)
 #define LEGIC_PRIME_SIGNAL_T_LISTENER_BIT       DIGITAL_SIGNAL_US(100)
 
 
@@ -50,7 +50,7 @@ static void legic_prime_signal_add_byte(LegicPrime_Signal* instance, uint8_t byt
 
 static void legic_prime_signal_encode(
     LegicPrime_Signal* instance,
-    const uint8_t* tx_data,
+    uint16_t tx_data,
     size_t tx_bits) {
     furi_assert(instance);
     furi_assert(tx_data);
@@ -60,7 +60,7 @@ static void legic_prime_signal_encode(
     for(size_t i = 0; i < tx_bits; i++) {
         digital_sequence_add_signal(
             instance->tx_sequence,
-            FURI_BIT(tx_data[0], i) ? LegicPrime_SignalIndexOne : LegicPrime_SignalIndexZero);
+            FURI_BIT(tx_data, i) ? LegicPrime_SignalIndexOne : LegicPrime_SignalIndexZero);
     }
     // End of frame
     digital_sequence_add_signal(instance->tx_sequence, LegicPrime_SignalIndexEof);
@@ -140,7 +140,7 @@ void legic_prime_signal_free(LegicPrime_Signal* instance) {
 
 void legic_prime_signal_tx(
     LegicPrime_Signal* instance,
-    const uint8_t* tx_data,
+    uint16_t tx_data,
     size_t tx_bits) {
     furi_assert(instance);
     furi_assert(tx_data);

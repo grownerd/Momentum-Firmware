@@ -668,7 +668,7 @@ NfcError
     furi_check(instance);
     furi_check(tx_buffer);
     furi_check(rx_buffer);
-    //UNUSED(fwt);
+    UNUSED(fwt);
 
     furi_check(instance->poller_state == NfcPollerStateReady);
 
@@ -688,17 +688,7 @@ NfcError
             ret = nfc_process_hal_error(error);
             break;
         }
-#if 0
-        instance->comm_state = NfcCommStateWaitTxEnd;
-        ret = nfc_poller_trx_state_machine(instance, fwt);
-        if(ret != NfcErrorNone) {
-            FURI_LOG_T(TAG, "Failed TRX state machine");
-            break;
-        }
-#else
-        furi_hal_nfc_poller_wait_event(fwt * 1000U);
         instance->comm_state = NfcCommStateWaitRxStart;
-#endif
 
         error = furi_hal_nfc_poller_rx(
             instance->rx_buffer, sizeof(instance->rx_buffer), &instance->rx_bits);

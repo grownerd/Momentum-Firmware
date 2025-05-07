@@ -2,56 +2,115 @@
 
 #include <furi/furi.h>
 
-#define LEGIC_PRIME_CRC_POLY (0x1021U) // Polynomial: x^16 + x^12 + x^5 + 1
-#define LEGIC_PRIME_CRC_INIT (0x0000U)
+#define BITMASK(x) (1 << (x))
 
-uint16_t legic_prime_crc_calculate(const uint8_t* data, size_t length) {
-    furi_check(data);
-
-    uint16_t crc = LEGIC_PRIME_CRC_INIT;
-
-    for(size_t i = 0; i < length; i++) {
-        crc ^= ((uint16_t)data[i] << 8);
-        for(size_t j = 0; j < 8; j++) {
-            if(crc & 0x8000) {
-                crc <<= 1;
-                crc ^= LEGIC_PRIME_CRC_POLY;
-            } else {
-                crc <<= 1;
-            }
-        }
+/*
+ ref  http://www.csm.ornl.gov/~dunigan/crc.html
+ Returns the value v with the bottom b [0,32] bits reflected.
+ Example: reflect(0x3e23L,3) == 0x3e26
+*/
+uint32_t reflect(uint32_t v, int b) {
+    uint32_t t = v;
+    for (int i = 0; i < b; ++i) {
+        if (t & 1)
+            v |=  BITMASK((b - 1) - i);
+        else
+            v &= ~BITMASK((b - 1) - i);
+        t >>= 1;
     }
-
-    return (crc << 8) | (crc >> 8);
+    return v;
 }
 
-void legic_prime_crc_append(BitBuffer* buf) {
-    furi_check(buf);
-    const uint8_t* data = bit_buffer_get_data(buf);
-    const size_t data_size = bit_buffer_get_size_bytes(buf);
+// https://graphics.stanford.edu/~seander/bithacks.html#BitReverseTable
 
-    const uint16_t crc = legic_prime_crc_calculate(data, data_size);
-    bit_buffer_append_bytes(buf, (const uint8_t*)&crc, LEGIC_PRIME_CRC_SIZE);
+// Reverse the bits in a byte with 3 operations (64-bit multiply and modulus division):
+uint8_t reflect8(uint8_t b) {
+    return (b * 0x0202020202ULL & 0x010884422010ULL) % 1023;
 }
 
-bool legic_prime_crc_check(const BitBuffer* buf) {
-    furi_check(buf);
-    const size_t data_size = bit_buffer_get_size_bytes(buf);
-    if(data_size <= LEGIC_PRIME_CRC_SIZE) return false;
-
-    uint16_t crc_received;
-    bit_buffer_write_bytes_mid(buf, &crc_received, data_size - LEGIC_PRIME_CRC_SIZE, LEGIC_PRIME_CRC_SIZE);
-
-    const uint8_t* data = bit_buffer_get_data(buf);
-    const uint16_t crc_calc = legic_prime_crc_calculate(data, data_size - LEGIC_PRIME_CRC_SIZE);
-
-    return crc_calc == crc_received;
+void crc_init_ref(crc_t *crc, int order, uint32_t polynom, uint32_t initial_value, uint32_t final_xor, bool refin, bool refout) {
+    crc_init(crc, order, polynom, initial_value, final_xor);
+    crc->refin = refin;
+    crc->refout = refout;
+    crc_clear(crc);
 }
 
-void legic_prime_crc_trim(BitBuffer* buf) {
-    furi_check(buf);
-    const size_t data_size = bit_buffer_get_size_bytes(buf);
-    furi_assert(data_size > LEGIC_PRIME_CRC_SIZE);
+void crc_init(crc_t *crc, int order, uint32_t polynom, uint32_t initial_value, uint32_t final_xor) {
+    crc->order = order;
+    crc->topbit = BITMASK(order - 1);
+    crc->polynom = polynom;
+    crc->initial_value = initial_value;
+    crc->final_xor = final_xor;
+    crc->mask = (1L << order) - 1;
+    crc->refin = false;
+    crc->refout = false;
+    crc_clear(crc);
+}
 
-    bit_buffer_set_size_bytes(buf, data_size - LEGIC_PRIME_CRC_SIZE);
+void crc_clear(crc_t *crc) {
+
+    crc->state = crc->initial_value & crc->mask;
+    if (crc->refin)
+        crc->state = reflect(crc->state, crc->order);
+}
+
+void crc_update2(crc_t *crc, uint32_t data, int data_width) {
+
+    if (crc->refin)
+        data = reflect(data, data_width);
+
+    // Bring the next byte into the remainder.
+    crc->state ^= data << (crc->order - data_width);
+
+    for (uint8_t bit = data_width; bit > 0; --bit) {
+
+        if (crc->state & crc->topbit)
+            crc->state = (crc->state << 1) ^ crc->polynom;
+        else
+            crc->state = (crc->state << 1);
+    }
+}
+
+void crc_update(crc_t *crc, uint32_t data, int data_width) {
+    if (crc->refin)
+        data = reflect(data, data_width);
+
+    int i;
+    for (i = 0; i < data_width; i++) {
+        int oldstate = crc->state;
+        crc->state = crc->state >> 1;
+        if ((oldstate ^ data) & 1) {
+            crc->state ^= crc->polynom;
+        }
+        data >>= 1;
+    }
+}
+
+uint32_t crc_finish(crc_t *crc) {
+    uint32_t val = crc->state;
+    if (crc->refout)
+        val = reflect(val, crc->order);
+    return (val ^ crc->final_xor) & crc->mask;
+}
+
+// width=4  poly=0xC, reversed poly=0x7  init=0x5   refin=true  refout=true  xorout=0x0000  check=  name="CRC-4/LEGIC"
+uint32_t CRC4Legic(uint8_t *buff, size_t size) {
+    UNUSED(size);
+
+    crc_t crc;
+    crc_init_ref(&crc, 4, 0x19 >> 1, 0x5, 0, true, true);
+    crc_update2(&crc, 1, 1); /* CMD_READ */
+    crc_update2(&crc, buff[0], 8);
+    crc_update2(&crc, buff[1], 8);
+    return reflect(crc_finish(&crc), 4);
+}
+// width=8  poly=0x63, reversed poly=0x8D  init=0x55  refin=true  refout=true  xorout=0x0000  check=0xC6  name="CRC-8/LEGIC"
+// the CRC needs to be reversed before returned.
+uint32_t CRC8Legic(uint8_t *buff, size_t size) {
+    crc_t crc;
+    crc_init_ref(&crc, 8, 0x63, 0x55, 0, true, true);
+    for (size_t i = 0; i < size; ++i) {
+        crc_update2(&crc, buff[i], 8);
+    }
+    return reflect8(crc_finish(&crc));
 }

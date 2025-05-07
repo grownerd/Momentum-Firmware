@@ -68,7 +68,12 @@ bool st25r3916_read_fifo(
              ST25R3916_REG_FIFO_STATUS2_fifo_lb_shift);
 
         if(bytes == 0) break;
-        if(bytes > buff_size) break;
+        //if(bytes > buff_size) break;
+        if(bytes > buff_size)
+        {
+            *buff_bits = bytes * 8;
+            break;
+        }
 
         st25r3916_reg_read_fifo(handle, buff, bytes);
 

@@ -41,7 +41,7 @@ void legic_prime_signal_free(LegicPrime_Signal* instance);
  */
 void legic_prime_signal_tx(
     LegicPrime_Signal* instance,
-    const uint8_t* tx_data,
+    uint16_t tx_data,
     size_t tx_bits);
 
 #ifdef __cplusplus

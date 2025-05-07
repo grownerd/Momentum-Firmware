@@ -1,6 +1,5 @@
 #include "legic_prime_poller_i.h"
 
-#include <nfc/helpers/legic_prime_crc.h>
 
 #define TAG "LegicPrimePoller"
 
@@ -23,7 +22,7 @@ LegicPrimeError legic_prime_poller_frame_exchange(
     furi_assert(instance);
 
     const size_t tx_bytes = bit_buffer_get_size_bytes(tx_buffer);
-    furi_assert(tx_bytes <= bit_buffer_get_capacity_bytes(instance->tx_buffer) - LEGIC_PRIME_CRC_SIZE);
+    furi_assert(tx_bytes <= bit_buffer_get_capacity_bytes(instance->tx_buffer));
 
     LegicPrimeError ret = LegicPrimeErrorNone;
 
@@ -61,6 +60,9 @@ LegicPrimeError legic_prime_poller_polling(
     LegicPrimeError error = LegicPrimeErrorNone;
 
     do {
+        bit_buffer_reset(instance->tx_buffer);
+        bit_buffer_reset(instance->rx_buffer);
+
         for (int i=0; i<cmd->num_bits; i++)
         {
             uint8_t bit = (cmd->data >> i) & 0x01;
@@ -71,7 +73,9 @@ LegicPrimeError legic_prime_poller_polling(
             instance, instance->tx_buffer, instance->rx_buffer, LEGIC_PRIME_POLLER_POLLING_FWT);
 
         if(error != LegicPrimeErrorNone) break;
-#if 0
+#if 1
+        bit_buffer_write_bytes_mid(instance->rx_buffer, resp->data, 0, 2);
+#else
         if(bit_buffer_get_byte(instance->rx_buffer, 1) != LEGIC_PRIME_POLLER_CMD_POLLING_RESP_CODE) {
             error = LegicPrimeErrorProtocol;
             break;
@@ -153,8 +157,17 @@ LegicPrimeError legic_prime_poller_read_blocks(
     furi_assert(block_numbers);
     furi_assert(response_ptr);
 
+    // Prepare bit buffer
     bit_buffer_reset(instance->rx_buffer);
     bit_buffer_reset(instance->tx_buffer);
+    uint16_t tx_frame = block_numbers[0] << 1 | 1;
+
+    // FIXME: 11 if card type mim1024
+    for (int i=0; i<9; i++)
+    {
+        uint8_t bit = (tx_frame >> i) & 0x01;
+        bit_buffer_append_bit(instance->tx_buffer, bit);
+    }
 
     LegicPrimeError error = legic_prime_poller_frame_exchange(
         instance, instance->tx_buffer, instance->rx_buffer, LEGIC_PRIME_POLLER_POLLING_FWT);
@@ -202,26 +215,38 @@ LegicPrimeError legic_prime_poller_activate(LegicPrimePoller* instance, LegicPri
     furi_assert(instance);
 
     LegicPrimeError ret;
-#if 0
+#if 1
     UNUSED(data);
+    instance->state = LegicPrimePollerStateActivated;
     ret = LegicPrimeErrorNone;
 #else
+    uint8_t iv = 0x01;
 
     do {
         bit_buffer_reset(instance->tx_buffer);
         bit_buffer_reset(instance->rx_buffer);
 
         // Send Polling command
-        const LegicPrimePollerPollingCommand polling_cmd = {
+        LegicPrimePollerPollingCommand polling_cmd = {
             .num_bits = 7,
-            .data = 0x55,
+            .data = iv,
         };
+
         LegicPrimePollerPollingResponse polling_resp = {};
 
         ret = legic_prime_poller_polling(instance, &polling_cmd, &polling_resp);
 
         if(ret != LegicPrimeErrorNone) {
             FURI_LOG_T(TAG, "Activation failed error: %d", ret);
+            break;
+        }
+        else if (polling_resp.data[0] & 0x3f)
+        {
+            break;
+        }
+        else
+        {
+            ret = LegicPrimeErrorTimeout;
             break;
         }
 
