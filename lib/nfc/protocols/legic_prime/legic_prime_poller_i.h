@@ -33,17 +33,17 @@ struct LegicPrimePoller {
     LegicPrimePollerEvent legic_prime_event;
     LegicPrimePollerEventData legic_prime_event_data;
     NfcGenericCallback callback;
-    uint8_t block_index;
     void* context;
 };
 
 typedef struct {
     uint8_t num_bits;
-    uint8_t data;
+    uint32_t data;
 } LegicPrimePollerPollingCommand;
 
 typedef struct {
-    uint8_t data[2];
+    uint8_t num_bits;
+    uint8_t data;
 } LegicPrimePollerPollingResponse;
 
 const LegicPrimeData* legic_prime_poller_get_data(LegicPrimePoller* instance);

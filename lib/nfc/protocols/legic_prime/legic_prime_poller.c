@@ -102,55 +102,28 @@ NfcCommand legic_prime_poller_state_handler_activate(LegicPrimePoller* instance)
 
 NfcCommand legic_prime_poller_state_handler_read_blocks(LegicPrimePoller* instance) {
     FURI_LOG_D(TAG, "Read Blocks");
-    //UNUSED(instance);
-
-    uint8_t block_count = 1;
-    uint8_t block_list[4] = {0, 0, 0, 0};
-    block_list[0] = instance->block_index;
 
     LegicPrimePollerReadCommandResponse* response;
 
     for (int i=0; i<256; i++)
     {
-        block_list[0] = i;
-        LegicPrimeError error = legic_prime_poller_read_blocks(
-            instance, block_count, block_list, &response);
+        LegicPrimeError error = legic_prime_poller_read_byte(
+            instance, i, &response);
         if(error == LegicPrimeErrorNone) {
-#if 0
-            block_count = (response->SF1 == 0) ? response->block_count : block_count;
-            uint8_t* data_ptr =
-                instance->data->data.dump + instance->data->blocks_total * sizeof(LegicPrimeBlock);
-
-            *data_ptr++ = response->SF1;
-            *data_ptr++ = response->SF2;
-
-            if(response->SF1 == 0) {
-                uint8_t* response_data_ptr = response->data;
-                instance->data->blocks_read++;
-                memcpy(data_ptr, response_data_ptr, LEGIC_PRIME_DATA_BLOCK_SIZE);
-            } else {
-                memset(data_ptr, 0, LEGIC_PRIME_DATA_BLOCK_SIZE);
-            }
-            instance->data->blocks_total++;
-
-            if(instance->data->blocks_total == LEGIC_PRIME_BLOCKS_TOTAL_COUNT) {
-                instance->state = LegicPrimePollerStateReadSuccess;
-            }
-#else
             uint8_t* data_ptr =
                 instance->data->data;
 
             uint8_t* response_data_ptr = response->foo;
             instance->data->blocks_read++;
-            memcpy(data_ptr, response_data_ptr, LEGIC_PRIME_DATA_BLOCK_SIZE);
+            memcpy(data_ptr + i, response_data_ptr, LEGIC_PRIME_DATA_BLOCK_SIZE);
             instance->state = LegicPrimePollerStateReadSuccess;
 
             FURI_LOG_I(TAG, "Read byte %3d: 0x%02X", i, response_data_ptr[0]);
-#endif
         } else {
             instance->legic_prime_event.type = LegicPrimePollerEventTypeError;
             instance->legic_prime_event_data.error = error;
             instance->state = LegicPrimePollerStateReadFailed;
+            i--;
         }
     }
     return NfcCommandContinue;
@@ -158,6 +131,8 @@ NfcCommand legic_prime_poller_state_handler_read_blocks(LegicPrimePoller* instan
 
 NfcCommand legic_prime_poller_state_handler_read_success(LegicPrimePoller* instance) {
     FURI_LOG_D(TAG, "Read Success");
+    instance->legic_prime_event.type = LegicPrimePollerEventTypeReady;
+    instance->legic_prime_event_data.error = LegicPrimeErrorNone;
     return instance->callback(instance->general_event, instance->context);
 }
 

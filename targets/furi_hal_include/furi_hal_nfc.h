@@ -472,6 +472,19 @@ FuriHalNfcError furi_hal_nfc_felica_listener_set_sensf_res_data(
     const uint8_t pmm_len,
     const uint16_t sys_code);
 
+/******************* Legic Prime specific API *******************/
+
+/**
+ * @brief Perform Legic Prime tag detection and setup handshake in poller mode.
+ *
+ * Sends an iv frame, interprets the answer, and sends an ACK frame if a tag is detected.
+ *
+ * @param[in] iv uint8_t initialization vector for the prng.
+ * @param[out] tag pointer to a uint8_t to return the tag type.
+ * @returns NfcErrorNone on success, NfcErrorTimeout on failure.
+*/
+//FuriHalNfcError furi_hal_nfc_legic_prime_poller_setup(uint8_t iv, uint8_t* tag);
+
 #ifdef __cplusplus
 }
 #endif

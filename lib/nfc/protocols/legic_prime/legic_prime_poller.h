@@ -45,9 +45,6 @@ typedef struct {
  *
  * Must ONLY be used inside the callback function.
  *
- * Perfoms the collision resolution procedure as defined in LegicPrime standars. The data
- * field will be filled with LegicPrime data on success.
- *
  * @param[in, out] instance pointer to the instance to be used in the transaction.
  * @param[out] data pointer to the LegicPrime data structure to be filled.
  * @return LegicPrimeErrorNone on success, an error code on failure.
@@ -55,18 +52,16 @@ typedef struct {
 LegicPrimeError legic_prime_poller_activate(LegicPrimePoller* instance, LegicPrimeData* data);
 
 /**
- * @brief Performs legic_prime read operation for blocks provided as parameters
+ * @brief Reads a byte from the tag
  * 
  * @param[in, out] instance pointer to the instance to be used in the transaction.
- * @param[in] block_count Amount of blocks involved in reading procedure
- * @param[in] block_numbers Array with block indexes according to legic_prime docs
+ * @param[in] addr Address of the byte to be retrieved.
  * @param[out] response_ptr Pointer to the response structure
  * @return LegicPrimeErrorNone on success, an error code on failure.
 */
-LegicPrimeError legic_prime_poller_read_blocks(
+LegicPrimeError legic_prime_poller_read_byte(
     LegicPrimePoller* instance,
-    const uint8_t block_count,
-    const uint8_t* const block_numbers,
+    uint16_t addr,
     LegicPrimePollerReadCommandResponse** const response_ptr);
 
 #ifdef __cplusplus

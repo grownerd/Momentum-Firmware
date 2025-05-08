@@ -9,19 +9,9 @@ extern "C" {
 
 #define LEGIC_PRIME_DATA_BLOCK_SIZE (1U)
 
-#if 0
-#define LEGIC_PRIME_GUARD_TIME_US     (5000)
-#define LEGIC_PRIME_FDT_POLL_FC       (1620)
-//#define LEGIC_PRIME_FDT_LISTEN_FC     (1172)
-//#define LEGIC_PRIME_POLLER_MASK_RX_FS ((LEGIC_PRIME_FDT_LISTEN_FC) / 2)
-#define LEGIC_PRIME_POLL_POLL_MIN_US  (1100)
-#else
 #define LEGIC_PRIME_GUARD_TIME_US     (0)
 #define LEGIC_PRIME_FDT_POLL_FC       (0)
-//#define LEGIC_PRIME_FDT_LISTEN_FC     (1172)
-//#define LEGIC_PRIME_POLLER_MASK_RX_FS ((LEGIC_PRIME_FDT_LISTEN_FC) / 2)
 #define LEGIC_PRIME_POLL_POLL_MIN_US  (0)
-#endif
 
 
 /** @brief Type of possible LegicPrime errors */

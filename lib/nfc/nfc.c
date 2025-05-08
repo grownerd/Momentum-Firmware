@@ -690,6 +690,7 @@ NfcError
         }
         instance->comm_state = NfcCommStateWaitRxStart;
 
+        instance->rx_bits = bit_buffer_get_size(rx_buffer);
         error = furi_hal_nfc_poller_rx(
             instance->rx_buffer, sizeof(instance->rx_buffer), &instance->rx_bits);
         if(error != FuriHalNfcErrorNone) {
