@@ -8,10 +8,10 @@
 #define LEGIC_PRIME_DEVICE_NAME   "LegicPrime"
 
 #define LEGIC_PRIME_DATA_FORMAT_VERSION   "Data format version"
-#define LEGIC_PRIME_MANUFACTURE_ID        "Manufacture id"
-#define LEGIC_PRIME_MANUFACTURE_PARAMETER "Manufacture parameter"
+//#define LEGIC_PRIME_MANUFACTURE_ID        "Manufacture id"
+//#define LEGIC_PRIME_MANUFACTURE_PARAMETER "Manufacture parameter"
 
-//static const uint32_t legic_prime_data_format_version = 1;
+static const uint32_t legic_prime_data_format_version = 1;
 
 const NfcDeviceBase nfc_device_legic_prime = {
     .protocol_name = LEGIC_PRIME_PROTOCOL_NAME,
@@ -60,16 +60,11 @@ bool legic_prime_verify(LegicPrimeData* data, const FuriString* device_type) {
 
 bool legic_prime_load(LegicPrimeData* data, FlipperFormat* ff, uint32_t version) {
     furi_check(data);
-    UNUSED(ff);
-    UNUSED(version);
 
     bool parsed = false;
 
-#if 0
     do {
         if(version < NFC_UNIFIED_FORMAT_VERSION) break;
-
-        uint32_t data_format_version = 0;
 
         parsed = true;
         uint32_t blocks_total = 0;
@@ -85,7 +80,7 @@ bool legic_prime_load(LegicPrimeData* data, FlipperFormat* ff, uint32_t version)
             if(!flipper_format_read_hex(
                    ff,
                    furi_string_get_cstr(temp_str),
-                   (&data->data.dump[i * sizeof(uint8_t)]),
+                   (&data->data[i * sizeof(uint8_t)]),
                    sizeof(uint8_t))) {
                 parsed = false;
                 break;
@@ -93,16 +88,13 @@ bool legic_prime_load(LegicPrimeData* data, FlipperFormat* ff, uint32_t version)
         }
     } while(false);
 
-#endif
     return parsed;
 }
 
 bool legic_prime_save(const LegicPrimeData* data, FlipperFormat* ff) {
     furi_check(data);
 
-    UNUSED(ff);
     bool saved = false;
-#if 0
 
     do {
         if(!flipper_format_write_comment_cstr(ff, LEGIC_PRIME_PROTOCOL_NAME " specific data")) break;
@@ -122,7 +114,7 @@ bool legic_prime_save(const LegicPrimeData* data, FlipperFormat* ff) {
             if(!flipper_format_write_hex(
                    ff,
                    furi_string_get_cstr(temp_str),
-                   (&data->data.dump[i * sizeof(uint8_t)]),
+                   (&data->data[i * sizeof(uint8_t)]),
                    sizeof(uint8_t))) {
                 saved = false;
                 break;
@@ -131,7 +123,6 @@ bool legic_prime_save(const LegicPrimeData* data, FlipperFormat* ff) {
         furi_string_free(temp_str);
     } while(false);
 
-#endif
     return saved;
 }
 
@@ -152,7 +143,7 @@ const char* legic_prime_get_device_name(const LegicPrimeData* data, NfcDeviceNam
 const uint8_t* legic_prime_get_uid(const LegicPrimeData* data, size_t* uid_len) {
     furi_check(data);
 
-    UNUSED(uid_len);
+    *uid_len = 4;
     return data->data;
 }
 
@@ -161,7 +152,6 @@ bool legic_prime_set_uid(LegicPrimeData* data, const uint8_t* uid, size_t uid_le
     UNUSED(uid);
     UNUSED(uid_len);
 
-    // Consider Manufacturer ID as UID
     const bool uid_valid = 1;
 
     return uid_valid;

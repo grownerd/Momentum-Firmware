@@ -105,6 +105,7 @@ NfcCommand legic_prime_poller_state_handler_read_blocks(LegicPrimePoller* instan
 
     LegicPrimePollerReadCommandResponse* response;
 
+    instance->data->blocks_read = 0;
     for (int i=0; i<256; i++)
     {
         LegicPrimeError error = legic_prime_poller_read_byte(

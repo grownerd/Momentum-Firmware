@@ -14,6 +14,34 @@ static LegicPrimeError legic_prime_poller_process_error(NfcError error) {
     }
 }
 
+static LegicPrimeError legic_prime_init_tag(LegicPrimeTagType cardtype, LegicPrimeTag *p_card) {
+    p_card->tagtype = cardtype;
+
+    switch (p_card->tagtype) {
+        case 0x0d:
+            p_card->cmdsize = 6;
+            p_card->addrsize = 5;
+            p_card->cardsize = 22;
+            break;
+        case 0x1d:
+            p_card->cmdsize = 9;
+            p_card->addrsize = 8;
+            p_card->cardsize = 256;
+            break;
+        case 0x3d:
+            p_card->cmdsize = 11;
+            p_card->addrsize = 10;
+            p_card->cardsize = 1024;
+            break;
+        default:
+            p_card->cmdsize = 0;
+            p_card->addrsize = 0;
+            p_card->cardsize = 0;
+            return LegicPrimeErrorNotPresent;
+    }
+    return LegicPrimeErrorNone;
+}
+
 LegicPrimeError legic_prime_poller_frame_exchange(
     const LegicPrimePoller* instance,
     const BitBuffer* tx_buffer,
@@ -99,10 +127,12 @@ LegicPrimeError legic_prime_poller_read_byte(
     // Prepare bit buffer
     bit_buffer_reset(instance->rx_buffer);
     bit_buffer_reset(instance->tx_buffer);
+
     uint16_t tx_frame = addr << 1 | 1;
 
-    // FIXME: 11 if card type mim1024
-    for (int i=0; i<9; i++)
+    uint16_t cmdsize = instance->data->tag.cmdsize;
+
+    for (int i=0; i<cmdsize; i++)
     {
         uint8_t bit = (tx_frame >> i) & 0x01;
         bit_buffer_append_bit(instance->tx_buffer, bit);
@@ -172,13 +202,18 @@ LegicPrimeError legic_prime_poller_activate(LegicPrimePoller* instance, LegicPri
         };
 
         ret = legic_prime_poller_polling(instance, &polling_cmd, &polling_resp);
-
         if(ret != LegicPrimeErrorNone) {
             FURI_LOG_T(TAG, "Activation failed error: %d", ret);
             break;
         }
 
-        data->tag_type = polling_resp.data;
+        ret = legic_prime_init_tag(polling_resp.data, &data->tag);
+        if(ret != LegicPrimeErrorNone) {
+            FURI_LOG_T(TAG, "Activation failed error: %d", ret);
+            break;
+        }
+        data->blocks_total = data->tag.cardsize;
+
         instance->state = LegicPrimePollerStateActivated;
     } while(false);
 

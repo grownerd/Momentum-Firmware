@@ -33,17 +33,17 @@ typedef enum {
 } LegicPrimeTagType;
 
 typedef struct {
-    uint8_t cmd_bits;
-    uint8_t addr_bits;
-    uint8_t mem_bytes;
-    uint8_t resp_data;
+    LegicPrimeTagType tagtype;
+    uint8_t cmdsize;
+    uint8_t addrsize;
+    uint16_t cardsize;
 } LegicPrimeTag;
 
 /** @brief Structure used to store LegicPrime data and additional values about reading */
 typedef struct {
-    uint8_t blocks_total;
-    uint8_t blocks_read;
-    LegicPrimeTagType tag_type;
+    uint16_t blocks_total;
+    uint16_t blocks_read;
+    LegicPrimeTag tag;
     uint8_t data[1024];
 } LegicPrimeData;
 
