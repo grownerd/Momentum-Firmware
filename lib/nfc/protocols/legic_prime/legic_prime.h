@@ -48,7 +48,7 @@ typedef struct {
 } LegicPrimeData;
 
 typedef struct {
-    uint8_t foo[1024];
+    uint8_t foo[1];
 } LegicPrimePollerReadCommandResponse;
 
 typedef LegicPrimePollerReadCommandResponse LegicPrimePollerWriteCommandResponse;
