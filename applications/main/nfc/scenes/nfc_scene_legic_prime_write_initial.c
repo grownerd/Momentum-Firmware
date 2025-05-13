@@ -12,13 +12,12 @@ nfc_scene_legic_prime_write_initial_worker_callback(NfcGenericEvent event,
   NfcCommand command = NfcCommandContinue;
   NfcApp *instance = context;
   LegicPrimePollerEvent *legic_prime_event = event.event_data;
-  const LegicPrimeData *write_data =
-      nfc_device_get_data(instance->nfc_device, NfcProtocolLegicPrime);
 
   if (legic_prime_event->type == LegicPrimePollerEventTypeRequestMode) {
-    // write?
-    legic_prime_event->data->write_block_data.write_block =
-        write_data->block[block_num];
+    // how do I get write data to the poller?
+    const LegicPrimeData *write_data =
+        nfc_device_get_data(instance->nfc_device, NfcProtocolLegicPrime);
+    legic_prime_event->write_data = write_data;
     legic_prime_event->data->poller_mode.mode = LegicPrimePollerModeWrite;
   } else if (legic_prime_event->type == LegicPrimePollerEventTypeSuccess) {
     view_dispatcher_send_custom_event(instance->view_dispatcher,

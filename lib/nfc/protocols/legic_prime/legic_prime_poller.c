@@ -146,7 +146,9 @@ legic_prime_poller_state_handler_write_blocks(LegicPrimePoller *instance) {
   uint16_t blocks_written = 0;
   for (int i = 7; i < instance->data->tag.cardsize; i++) {
     // FIXME: why is data empty?
-    uint8_t byte = instance->data->data[i];
+    LegicPrimePollerEvent event = instance->legic_prime_event;
+    // uint8_t byte = instance->data->data[i];
+    uint8_t byte = event.write_data->data[i];
     LegicPrimeError error =
         legic_prime_poller_write_byte(instance, i, byte, &response);
 
@@ -247,7 +249,7 @@ static bool legic_prime_poller_detect(NfcGenericEvent event, void *context) {
   NfcEvent *nfc_event = event.event_data;
   furi_assert(instance->state == LegicPrimePollerStateIdle);
 
-  legic_prime_reset(instance->data);
+  // legic_prime_reset(instance->data);
 
   if (nfc_event->type == NfcEventTypePollerReady) {
     LegicPrimeError error =

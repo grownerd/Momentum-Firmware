@@ -60,6 +60,7 @@ typedef union {
 typedef struct {
     LegicPrimePollerEventType type; /**< Type of emmitted event. */
     LegicPrimePollerEventData* data; /**< Pointer to event specific data. */
+    const LegicPrimeData* write_data;
 } LegicPrimePollerEvent;
 
 /**
