@@ -194,7 +194,6 @@ const NfcProtocolSupportBase nfc_protocol_support_legic_prime = {
         },
     .scene_read_menu =
         {
-            // .on_enter = nfc_protocol_support_common_on_enter_empty,
             .on_enter = nfc_scene_read_menu_on_enter_legic_prime,
             .on_event = nfc_scene_read_menu_on_event_legic_prime,
         },
