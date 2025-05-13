@@ -122,8 +122,10 @@ legic_prime_poller_state_handler_read_blocks(LegicPrimePoller *instance) {
       uint8_t *data_ptr = instance->data->data;
 
       uint8_t *response_data_ptr = response->foo;
+      uint8_t read_byte =
+          i < 22 ? response_data_ptr[0] : response_data_ptr[0] ^ data_ptr[4];
       instance->data->blocks_read++;
-      memcpy(data_ptr + i, response_data_ptr, LEGIC_PRIME_DATA_BLOCK_SIZE);
+      memcpy(data_ptr + i, &read_byte, LEGIC_PRIME_DATA_BLOCK_SIZE);
       instance->state = LegicPrimePollerStateReadSuccess;
 
       FURI_LOG_I(TAG, "Read byte %3d: 0x%02X", i, response_data_ptr[0]);
@@ -145,9 +147,7 @@ legic_prime_poller_state_handler_write_blocks(LegicPrimePoller *instance) {
 
   uint16_t blocks_written = 0;
   for (int i = 7; i < instance->data->tag.cardsize; i++) {
-    // FIXME: why is data empty?
     LegicPrimePollerEvent event = instance->legic_prime_event;
-    // uint8_t byte = instance->data->data[i];
     uint8_t byte = event.write_data->data[i];
     LegicPrimeError error =
         legic_prime_poller_write_byte(instance, i, byte, &response);

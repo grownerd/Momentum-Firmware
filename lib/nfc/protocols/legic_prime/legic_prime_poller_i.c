@@ -145,7 +145,7 @@ LegicPrimeError legic_prime_poller_read_byte(
     bit_buffer_append_bit(instance->tx_buffer, bit);
   }
 
-  for (int i = 0; i < 8; i++) {
+  for (int i = 0; i < cmdsize; i++) {
     uint8_t bit = 0;
     bit_buffer_append_bit(instance->rx_buffer, bit);
   }
