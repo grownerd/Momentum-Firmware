@@ -16,3 +16,5 @@ void nfc_render_legic_prime_format_bytes(FuriString* str, const uint8_t* data, s
 void nfc_render_legic_prime_brief(const LegicPrimeData* data, FuriString* str);
 
 void nfc_render_legic_prime_extra(const LegicPrimeData* data, FuriString* str);
+
+void nfc_render_legic_prime_dump(const LegicPrimeData* data, FuriString* str);

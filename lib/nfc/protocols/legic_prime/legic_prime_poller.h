@@ -62,6 +62,7 @@ typedef struct {
     LegicPrimePollerEventData* data; /**< Pointer to event specific data. */
     // TODO: is this the right place to put write data?
     const LegicPrimeData* write_data;
+    uint8_t write_mask[1024];
 } LegicPrimePollerEvent;
 
 /**

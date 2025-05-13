@@ -122,8 +122,9 @@ legic_prime_poller_state_handler_read_blocks(LegicPrimePoller *instance) {
       uint8_t *data_ptr = instance->data->data;
 
       uint8_t *response_data_ptr = response->foo;
-      uint8_t read_byte =
-          i < 22 ? response_data_ptr[0] : response_data_ptr[0] ^ data_ptr[4];
+      uint8_t read_byte = response_data_ptr[0];
+      // uint8_t read_byte =
+      //     i < 22 ? response_data_ptr[0] : response_data_ptr[0] ^ data_ptr[4];
       instance->data->blocks_read++;
       memcpy(data_ptr + i, &read_byte, LEGIC_PRIME_DATA_BLOCK_SIZE);
       instance->state = LegicPrimePollerStateReadSuccess;
@@ -145,28 +146,37 @@ legic_prime_poller_state_handler_write_blocks(LegicPrimePoller *instance) {
 
   LegicPrimePollerReadCommandResponse *response;
 
+  uint16_t blocks_to_write = 0;
   uint16_t blocks_written = 0;
   for (int i = 7; i < instance->data->tag.cardsize; i++) {
     LegicPrimePollerEvent event = instance->legic_prime_event;
+    uint8_t *write_mask = event.write_mask;
     uint8_t byte = event.write_data->data[i];
-    LegicPrimeError error =
-        legic_prime_poller_write_byte(instance, i, byte, &response);
 
-    if (error == LegicPrimeErrorNone) {
+    if (write_mask[i]) {
+      blocks_to_write++;
+      LegicPrimeError error =
+          legic_prime_poller_write_byte(instance, i, byte, &response);
 
-      uint8_t *response_data_ptr = response->foo;
-      blocks_written++;
-      instance->state = LegicPrimePollerStateWriteSuccess;
+      if (error == LegicPrimeErrorNone) {
 
-      FURI_LOG_I(TAG, "Wrote byte %3d: 0x%02X, response: 0x%03X", i, byte,
-                 response_data_ptr[0]);
-    } else {
-      instance->legic_prime_event.type = LegicPrimePollerEventTypeFail;
-      instance->legic_prime_event_data.error = error;
-      instance->state = LegicPrimePollerStateWriteFailed;
-      i--;
+        uint8_t *response_data_ptr = response->foo;
+        blocks_written++;
+        instance->state = LegicPrimePollerStateWriteSuccess;
+
+        FURI_LOG_I(TAG, "Wrote byte %3d: 0x%02X, response: 0x%03X", i, byte,
+                   response_data_ptr[0]);
+      } else {
+        instance->legic_prime_event.type = LegicPrimePollerEventTypeFail;
+        instance->legic_prime_event_data.error = error;
+        instance->state = LegicPrimePollerStateWriteFailed;
+        i--;
+      }
     }
   }
+  if (blocks_written == blocks_to_write)
+    instance->state = LegicPrimePollerStateWriteSuccess;
+
   return NfcCommandContinue;
 }
 
