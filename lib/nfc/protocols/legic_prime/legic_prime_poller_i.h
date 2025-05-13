@@ -13,10 +13,14 @@ extern "C" {
 
 typedef enum {
     LegicPrimePollerStateIdle,
-    LegicPrimePollerStateActivated,
+    //LegicPrimePollerStateActivated,
+    LegicPrimePollerStateRequestMode,
     LegicPrimePollerStateReadBlocks,
     LegicPrimePollerStateReadSuccess,
     LegicPrimePollerStateReadFailed,
+    LegicPrimePollerStateWriteBlocks,
+    LegicPrimePollerStateWriteSuccess,
+    LegicPrimePollerStateWriteFailed,
 
     LegicPrimePollerStateNum
 } LegicPrimePollerState;
@@ -62,6 +66,19 @@ LegicPrimeError legic_prime_poller_polling(
     LegicPrimePollerPollingResponse* resp);
 
 /**
+ * @brief Reads a byte from the tag
+ * 
+ * @param[in, out] instance pointer to the instance to be used in the transaction.
+ * @param[in] addr Address of the byte to be retrieved.
+ * @param[out] response_ptr Pointer to the response structure
+ * @return LegicPrimeErrorNone on success, an error code on failure.
+*/
+LegicPrimeError legic_prime_poller_read_byte(
+    LegicPrimePoller* instance,
+    uint16_t addr,
+    LegicPrimePollerReadCommandResponse** const response_ptr);
+
+/**
  * @brief Performs legic_prime write operation with data provided as parameters
  * 
  * @param[in, out] instance pointer to the instance to be used in the transaction.
@@ -71,12 +88,11 @@ LegicPrimeError legic_prime_poller_polling(
  * @param[out] response_ptr Pointer to the response structure
  * @return LegicPrimeErrorNone on success, an error code on failure.
 */
-LegicPrimeError legic_prime_poller_write_blocks(
-    const LegicPrimePoller* instance,
-    const uint8_t block_count,
-    const uint8_t* const block_numbers,
-    const uint8_t* data,
-    LegicPrimePollerWriteCommandResponse** const response_ptr);
+LegicPrimeError legic_prime_poller_write_byte(
+    LegicPrimePoller* instance,
+    uint16_t addr,
+    uint8_t data,
+    LegicPrimePollerReadCommandResponse** const response_ptr);
 
 /**
  * @brief Perform frame exchange procedure.
@@ -98,4 +114,5 @@ LegicPrimeError legic_prime_poller_frame_exchange(
 
 #ifdef __cplusplus
 }
+
 #endif

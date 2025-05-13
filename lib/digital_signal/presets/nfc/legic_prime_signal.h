@@ -39,10 +39,7 @@ void legic_prime_signal_free(LegicPrime_Signal* instance);
  * @param[in] tx_data pointer to the data to be transmitted.
  * @param[in] tx_bits size of the data to be transmitted in bits.
  */
-void legic_prime_signal_tx(
-    LegicPrime_Signal* instance,
-    uint16_t tx_data,
-    size_t tx_bits);
+void legic_prime_signal_tx(LegicPrime_Signal* instance, uint32_t tx_data, size_t tx_bits);
 
 #ifdef __cplusplus
 }

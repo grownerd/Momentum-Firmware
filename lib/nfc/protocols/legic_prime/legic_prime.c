@@ -69,22 +69,20 @@ bool legic_prime_load(LegicPrimeData* data, FlipperFormat* ff, uint32_t version)
         parsed = true;
         uint32_t blocks_total = 0;
         uint32_t blocks_read = 0;
-        if(!flipper_format_read_uint32(ff, "Blocks total", &blocks_total, 1)) break;
-        if(!flipper_format_read_uint32(ff, "Blocks read", &blocks_read, 1)) break;
-        data->blocks_total = (uint8_t)blocks_total;
-        data->blocks_read = (uint8_t)blocks_read;
+        if(!flipper_format_read_uint32(ff, "Bytes total", &blocks_total, 1)) break;
+        if(!flipper_format_read_uint32(ff, "Bytes read", &blocks_read, 1)) break;
+        data->blocks_total = (uint16_t)blocks_total;
+        data->blocks_read = (uint16_t)blocks_read;
 
         FuriString* temp_str = furi_string_alloc();
-        for(uint8_t i = 0; i < data->blocks_total; i++) {
-            furi_string_printf(temp_str, "Block %d", i);
-            if(!flipper_format_read_hex(
-                   ff,
-                   furi_string_get_cstr(temp_str),
-                   (&data->data[i * sizeof(uint8_t)]),
-                   sizeof(uint8_t))) {
-                parsed = false;
-                break;
-            }
+        furi_string_printf(temp_str, "Data");
+        if(!flipper_format_read_hex(
+               ff,
+               furi_string_get_cstr(temp_str),
+               (&data->data[0]),
+               blocks_total * sizeof(uint8_t))) {
+            parsed = false;
+            break;
         }
     } while(false);
 
@@ -104,21 +102,19 @@ bool legic_prime_save(const LegicPrimeData* data, FlipperFormat* ff) {
 
         uint32_t blocks_total = data->blocks_total;
         uint32_t blocks_read = data->blocks_read;
-        if(!flipper_format_write_uint32(ff, "Blocks total", &blocks_total, 1)) break;
-        if(!flipper_format_write_uint32(ff, "Blocks read", &blocks_read, 1)) break;
+        if(!flipper_format_write_uint32(ff, "Bytes total", &blocks_total, 1)) break;
+        if(!flipper_format_write_uint32(ff, "Bytes read", &blocks_read, 1)) break;
 
         saved = true;
         FuriString* temp_str = furi_string_alloc();
-        for(uint8_t i = 0; i < blocks_total; i++) {
-            furi_string_printf(temp_str, "Block %d", i);
-            if(!flipper_format_write_hex(
-                   ff,
-                   furi_string_get_cstr(temp_str),
-                   (&data->data[i * sizeof(uint8_t)]),
-                   sizeof(uint8_t))) {
-                saved = false;
-                break;
-            }
+        furi_string_printf(temp_str, "Data");
+        if(!flipper_format_write_hex(
+               ff,
+               furi_string_get_cstr(temp_str),
+               (&data->data[0]),
+               blocks_total * sizeof(uint8_t))) {
+            saved = false;
+            break;
         }
         furi_string_free(temp_str);
     } while(false);

@@ -674,13 +674,18 @@ NfcError
 
     NfcError ret = NfcErrorNone;
     FuriHalNfcError error = FuriHalNfcErrorNone;
+
+    //int rep = bit_buffer_get_size(tx_buffer) == 9 ? 3 : 0;
+    int rep = 0;
     do {
+#if 0
         furi_hal_nfc_trx_reset();
         while(furi_hal_nfc_timer_block_tx_is_running()) {
             FuriHalNfcEvent event =
                 furi_hal_nfc_poller_wait_event(FURI_HAL_NFC_EVENT_WAIT_FOREVER);
             if(event & FuriHalNfcEventTimerBlockTxExpired) break;
         }
+#endif
         error =
             furi_hal_nfc_poller_tx(bit_buffer_get_data(tx_buffer), bit_buffer_get_size(tx_buffer));
         if(error != FuriHalNfcErrorNone) {
@@ -700,7 +705,7 @@ NfcError
         }
 
         bit_buffer_copy_bits(rx_buffer, instance->rx_buffer, instance->rx_bits);
-    } while(false);
+    } while(rep--);
 
     return ret;
 }

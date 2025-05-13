@@ -59,6 +59,10 @@ ADD_SCENE(nfc, mf_classic_keys_delete, MfClassicKeysDelete)
 ADD_SCENE(nfc, mf_classic_keys_add, MfClassicKeysAdd)
 ADD_SCENE(nfc, mf_classic_keys_warn_duplicate, MfClassicKeysWarnDuplicate)
 
+ADD_SCENE(nfc, legic_prime_write_initial, LegicPrimeWriteInitial)
+ADD_SCENE(nfc, legic_prime_write_initial_success, LegicPrimeWriteInitialSuccess)
+ADD_SCENE(nfc, legic_prime_write_initial_fail, LegicPrimeWriteInitialFail)
+
 ADD_SCENE(nfc, set_type, SetType)
 ADD_SCENE(nfc, set_sak, SetSak)
 ADD_SCENE(nfc, set_atqa, SetAtqa)

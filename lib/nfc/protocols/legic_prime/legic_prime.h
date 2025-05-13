@@ -27,6 +27,11 @@ typedef enum {
 } LegicPrimeError;
 
 typedef enum {
+    LegicPrimeCmdWrite = 0,
+    LegicPrimeCmdRead = 1,
+} LegicPrimeCmd;
+
+typedef enum {
     LegicPrimeTagTypeMim22 = 0x0d,
     LegicPrimeTagTypeMim256 = 0x1d,
     LegicPrimeTagTypeMim1024 = 0x3d,

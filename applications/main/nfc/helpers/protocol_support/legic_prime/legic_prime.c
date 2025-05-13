@@ -8,64 +8,143 @@
 #include "../nfc_protocol_support_common.h"
 #include "../nfc_protocol_support_gui_common.h"
 
-static void nfc_scene_info_on_enter_legic_prime(NfcApp* instance) {
-    const NfcDevice* device = instance->nfc_device;
-    const LegicPrimeData* data = nfc_device_get_data(device, NfcProtocolLegicPrime);
+#define TAG "LegicPrimeApp"
 
-    FuriString* temp_str = furi_string_alloc();
-    nfc_append_filename_string_when_present(instance, temp_str);
+enum {
+  // SubmenuIndexFreeParking = SubmenuIndexCommonMax,
+  SubmenuIndexWrite = SubmenuIndexCommonMax,
+  // SubmenuIndexWrite,
+  // SubmenuIndexUpdate,
+};
 
-    furi_string_cat_printf(
-        temp_str, "\e#%s\n", nfc_device_get_name(device, NfcDeviceNameTypeFull));
-    nfc_render_legic_prime_info(data, NfcProtocolFormatTypeFull, temp_str);
+static void nfc_scene_info_on_enter_legic_prime(NfcApp *instance) {
+  const NfcDevice *device = instance->nfc_device;
+  const LegicPrimeData *data =
+      nfc_device_get_data(device, NfcProtocolLegicPrime);
 
-    widget_add_text_scroll_element(
-        instance->widget, 0, 0, 128, 64, furi_string_get_cstr(temp_str));
+  FuriString *temp_str = furi_string_alloc();
+  nfc_append_filename_string_when_present(instance, temp_str);
 
-    furi_string_free(temp_str);
+  furi_string_cat_printf(temp_str, "\e#%s\n",
+                         nfc_device_get_name(device, NfcDeviceNameTypeFull));
+  nfc_render_legic_prime_info(data, NfcProtocolFormatTypeFull, temp_str);
+
+  widget_add_text_scroll_element(instance->widget, 0, 0, 128, 64,
+                                 furi_string_get_cstr(temp_str));
+
+  furi_string_free(temp_str);
+}
+
+static void nfc_scene_more_info_on_enter_legic_prime(NfcApp *instance) {
+  const NfcDevice *device = instance->nfc_device;
+  const LegicPrimeData *data =
+      nfc_device_get_data(device, NfcProtocolLegicPrime);
+
+  FuriString *temp_str = furi_string_alloc();
+  nfc_append_filename_string_when_present(instance, temp_str);
+
+  furi_string_cat_printf(temp_str, "\e#%s\n",
+                         nfc_device_get_name(device, NfcDeviceNameTypeFull));
+  nfc_render_legic_prime_info(data, NfcProtocolFormatTypeFull, temp_str);
+
+  widget_add_text_scroll_element(instance->widget, 0, 0, 128, 64,
+                                 furi_string_get_cstr(temp_str));
+
+  furi_string_free(temp_str);
 }
 
 static NfcCommand
-    nfc_scene_read_poller_callback_legic_prime(NfcGenericEvent event, void* context) {
-    furi_assert(event.protocol == NfcProtocolLegicPrime);
+nfc_scene_read_poller_callback_legic_prime(NfcGenericEvent event,
+                                           void *context) {
+  furi_assert(event.protocol == NfcProtocolLegicPrime);
 
-    NfcApp* instance = context;
-    const LegicPrimePollerEvent* legic_prime_event = event.event_data;
+  NfcApp *instance = context;
+  const LegicPrimePollerEvent *legic_prime_event = event.event_data;
 
-    if(legic_prime_event->type == LegicPrimePollerEventTypeReady) {
-        nfc_device_set_data(
-            instance->nfc_device, NfcProtocolLegicPrime, nfc_poller_get_data(instance->poller));
-        view_dispatcher_send_custom_event(instance->view_dispatcher, NfcCustomEventPollerSuccess);
-        return NfcCommandStop;
+  if (legic_prime_event->type == LegicPrimePollerEventTypeRequestMode) {
+    legic_prime_event->data->poller_mode.mode = LegicPrimePollerModeRead;
+  } else if (legic_prime_event->type == LegicPrimePollerEventTypeSuccess) {
+    nfc_device_set_data(instance->nfc_device, NfcProtocolLegicPrime,
+                        nfc_poller_get_data(instance->poller));
+    view_dispatcher_send_custom_event(instance->view_dispatcher,
+                                      NfcCustomEventPollerSuccess);
+    return NfcCommandStop;
+  }
+
+  return NfcCommandContinue;
+}
+
+static void nfc_scene_read_on_enter_legic_prime(NfcApp *instance) {
+  nfc_poller_start(instance->poller, nfc_scene_read_poller_callback_legic_prime,
+                   instance);
+}
+
+static void nfc_scene_read_success_on_enter_legic_prime(NfcApp *instance) {
+  const NfcDevice *device = instance->nfc_device;
+  const LegicPrimeData *data =
+      nfc_device_get_data(device, NfcProtocolLegicPrime);
+
+  FuriString *temp_str = furi_string_alloc();
+  furi_string_cat_printf(temp_str, "\e#%s\n",
+                         nfc_device_get_name(device, NfcDeviceNameTypeFull));
+  nfc_render_legic_prime_info(data, NfcProtocolFormatTypeShort, temp_str);
+
+  widget_add_text_scroll_element(instance->widget, 0, 0, 128, 52,
+                                 furi_string_get_cstr(temp_str));
+
+  furi_string_free(temp_str);
+}
+
+static void nfc_scene_saved_menu_on_enter_legic_prime(NfcApp *instance) {
+  Submenu *submenu = instance->submenu;
+  // const LegicPrimeData* data = nfc_device_get_data(instance->nfc_device,
+  // NfcProtocolLegicPrime);
+
+  // submenu_add_item(
+  // submenu,
+  // "Free Parking",
+  // SubmenuIndexWrite,
+  // nfc_protocol_support_common_submenu_callback,
+  // instance);
+
+  submenu_add_item(submenu, "Write to tag", SubmenuIndexWrite,
+                   nfc_protocol_support_common_submenu_callback, instance);
+
+  // submenu_add_item(
+  //     submenu,
+  //     "Update from Initial Card",
+  //     SubmenuIndexUpdate,
+  //     nfc_protocol_support_common_submenu_callback,
+  //     instance);
+}
+
+static bool nfc_scene_saved_menu_on_event_legic_prime(NfcApp *instance,
+                                                      SceneManagerEvent event) {
+  bool consumed = false;
+
+  if (event.type == SceneManagerEventTypeCustom) {
+    // if(event.event == SubmenuIndexFreeParking) {
+    //     scene_manager_next_scene(instance->scene_manager,
+    //     NfcSceneLegicPrimeFreeParking); consumed = true;
+    if (event.event == SubmenuIndexWrite) {
+      scene_manager_next_scene(instance->scene_manager,
+                               NfcSceneLegicPrimeWriteInitial);
+      consumed = true;
+      // } else if(event.event == SubmenuIndexUpdate) {
+      //     scene_manager_next_scene(instance->scene_manager,
+      //     NfcSceneLegicPrimeUpdateInitial); consumed = true;
+      // }
     }
-
-    return NfcCommandContinue;
-}
-
-static void nfc_scene_read_on_enter_legic_prime(NfcApp* instance) {
-    nfc_poller_start(instance->poller, nfc_scene_read_poller_callback_legic_prime, instance);
-}
-
-static void nfc_scene_read_success_on_enter_legic_prime(NfcApp* instance) {
-    const NfcDevice* device = instance->nfc_device;
-    const LegicPrimeData* data = nfc_device_get_data(device, NfcProtocolLegicPrime);
-
-    FuriString* temp_str = furi_string_alloc();
-    furi_string_cat_printf(
-        temp_str, "\e#%s\n", nfc_device_get_name(device, NfcDeviceNameTypeFull));
-    nfc_render_legic_prime_info(data, NfcProtocolFormatTypeShort, temp_str);
-
-    widget_add_text_scroll_element(
-        instance->widget, 0, 0, 128, 52, furi_string_get_cstr(temp_str));
-
-    furi_string_free(temp_str);
+  }
+  return consumed;
 }
 
 static NfcCommand
-    nfc_scene_emulate_listener_callback_legic_prime(NfcGenericEvent event, void* context) {
-    furi_assert(context);
-    furi_assert(event.protocol == NfcProtocolLegicPrime);
-    furi_assert(event.event_data);
+nfc_scene_emulate_listener_callback_legic_prime(NfcGenericEvent event,
+                                                void *context) {
+  furi_assert(context);
+  furi_assert(event.protocol == NfcProtocolLegicPrime);
+  furi_assert(event.event_data);
 
 #if 0
     NfcApp* nfc = context;
@@ -87,33 +166,41 @@ static NfcCommand
     }
 #endif
 
-    return NfcCommandContinue;
+  return NfcCommandContinue;
 }
 
-static void nfc_scene_emulate_on_enter_legic_prime(NfcApp* instance) {
-    const LegicPrimeData* data =
-        nfc_device_get_data(instance->nfc_device, NfcProtocolLegicPrime);
+static void nfc_scene_emulate_on_enter_legic_prime(NfcApp *instance) {
+  const LegicPrimeData *data =
+      nfc_device_get_data(instance->nfc_device, NfcProtocolLegicPrime);
 
-    instance->listener = nfc_listener_alloc(instance->nfc, NfcProtocolLegicPrime, data);
-    nfc_listener_start(
-        instance->listener, nfc_scene_emulate_listener_callback_legic_prime, instance);
+  instance->listener =
+      nfc_listener_alloc(instance->nfc, NfcProtocolLegicPrime, data);
+  nfc_listener_start(instance->listener,
+                     nfc_scene_emulate_listener_callback_legic_prime, instance);
 }
 
-static bool nfc_scene_read_menu_on_event_legic_prime(NfcApp* instance, SceneManagerEvent event) {
-    if(event.type == SceneManagerEventTypeCustom && event.event == SubmenuIndexCommonEmulate) {
-        scene_manager_next_scene(instance->scene_manager, NfcSceneEmulate);
-        return true;
-    }
+static bool nfc_scene_read_menu_on_event_legic_prime(NfcApp *instance,
+                                                     SceneManagerEvent event) {
+  if (event.type == SceneManagerEventTypeCustom &&
+      event.event == SubmenuIndexCommonEmulate) {
+    scene_manager_next_scene(instance->scene_manager, NfcSceneEmulate);
+    return true;
+  }
 
-    return false;
+  return false;
 }
 
 const NfcProtocolSupportBase nfc_protocol_support_legic_prime = {
-    .features = NfcProtocolFeatureEmulateUid | NfcProtocolFeatureEditUid,
+    .features = NfcProtocolFeatureEmulateFull | NfcProtocolFeatureMoreInfo,
 
     .scene_info =
         {
             .on_enter = nfc_scene_info_on_enter_legic_prime,
+            .on_event = nfc_protocol_support_common_on_event_empty,
+        },
+    .scene_more_info =
+        {
+            .on_enter = nfc_scene_more_info_on_enter_legic_prime,
             .on_event = nfc_protocol_support_common_on_event_empty,
         },
     .scene_read =
@@ -133,8 +220,8 @@ const NfcProtocolSupportBase nfc_protocol_support_legic_prime = {
         },
     .scene_saved_menu =
         {
-            .on_enter = nfc_protocol_support_common_on_enter_empty,
-            .on_event = nfc_protocol_support_common_on_event_empty,
+            .on_enter = nfc_scene_saved_menu_on_enter_legic_prime,
+            .on_event = nfc_scene_saved_menu_on_event_legic_prime,
         },
     .scene_save_name =
         {

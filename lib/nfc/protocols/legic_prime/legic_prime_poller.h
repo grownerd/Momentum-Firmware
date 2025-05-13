@@ -21,13 +21,35 @@ typedef enum {
     LegicPrimePollerEventTypeError, /**< An error occured during activation procedure. */
     LegicPrimePollerEventTypeReady, /**< The card was activated and fully read by the poller. */
     LegicPrimePollerEventTypeIncomplete, /**< The card was activated and partly read by the poller. */
+    LegicPrimePollerEventTypeRequestMode,
+    LegicPrimePollerEventTypeSuccess,
+    LegicPrimePollerEventTypeFail,
 } LegicPrimePollerEventType;
+
+/**
+ * @brief LegicPrime poller mode.
+ */
+typedef enum {
+    LegicPrimePollerModeRead, /**< Poller reading mode. */
+    LegicPrimePollerModeWrite, /**< Poller writing mode. */
+} LegicPrimePollerMode;
+
+/**
+ * @brief LegicPrime poller request mode event data.
+ *
+ * This instance of this structure must be filled on LegicPrimePollerEventTypeRequestMode event.
+ */
+typedef struct {
+    LegicPrimePollerMode mode; /**< Mode to be used by poller. */
+    const LegicPrimeData* data; /**< Data to be used by poller. */
+} LegicPrimePollerEventDataRequestMode;
 
 /**
  * @brief LegicPrime poller event data.
  */
 typedef union {
     LegicPrimeError error; /**< Error code indicating card activation fail reason. */
+    LegicPrimePollerEventDataRequestMode poller_mode; /**< Poller mode context. */
 } LegicPrimePollerEventData;
 
 /**
@@ -50,19 +72,6 @@ typedef struct {
  * @return LegicPrimeErrorNone on success, an error code on failure.
  */
 LegicPrimeError legic_prime_poller_activate(LegicPrimePoller* instance, LegicPrimeData* data);
-
-/**
- * @brief Reads a byte from the tag
- * 
- * @param[in, out] instance pointer to the instance to be used in the transaction.
- * @param[in] addr Address of the byte to be retrieved.
- * @param[out] response_ptr Pointer to the response structure
- * @return LegicPrimeErrorNone on success, an error code on failure.
-*/
-LegicPrimeError legic_prime_poller_read_byte(
-    LegicPrimePoller* instance,
-    uint16_t addr,
-    LegicPrimePollerReadCommandResponse** const response_ptr);
 
 #ifdef __cplusplus
 }
