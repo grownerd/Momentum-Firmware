@@ -3,32 +3,49 @@
 
 #include <furi.h>
 #include <furi_hal_resources.h>
-#include <furi_hal_vibro.h>
 
 #include <digital_signal/presets/nfc/legic_prime_signal.h>
 #include <nfc/helpers/legic_prime_crc.h>
 #include <nfc/helpers/legic_prng.h>
+#include <nfc/protocols/legic_prime/legic_prime.h>
 
 #define TAG "FuriHalLegicPrime"
 
 // Prevent FDT timer from starting
 #define FURI_HAL_NFC_LEGIC_PRIME_LISTENER_FDT_COMP_FC (INT32_MAX)
 
-#define RX_BUF_DEPTH (1024UL)
-
-// :'<,'>s/#define \(\w\+\) \((\d\+)\)\(.*\)/static volatile int32_t \1 = \2;\3/
-// :'<,'>s/static volatile int32_t \(\w\+\) = \((\d\+)\);/#define \1 \2/
-
+#define MAX_RX_ERRORS (100)
+#define BITS_IN_BYTE (8)
 #define MAX_ANSWER_BITS (12)
-static volatile int32_t WRITE_ACK_DELAY = (3540);
+
+/*
+ * These should be constatns, but in order to be able to adjust timings
+ * in gdb, they have to be static volatile ints.
+ *
+ * Use the regexes below to turn them from one into the other.
+ *
+ * s/#define \(\w\+\) \((\d\+)\)\(.*\)/static volatile int32_t \1 = \2;\3/
+ * s/static volatile int32_t \(\w\+\) = \((\d\+)\);/#define \1 \2/
+ */
+static volatile int32_t WRITE_ACK_DELAY = (3540); // ~3.6ms
 static volatile int32_t BIT_T_1 = (40);
 static volatile int32_t BIT_T_1_TOL = (10);
-static volatile int32_t ACK_PAUSE_COMP = (42);
-static volatile int32_t RX_FWT_READ_T = (19100); // ~1700us
-static volatile int32_t RX_FWT_WRITE_T = (3700); // ~3.6ms
-static volatile int32_t RX_FWT_ACK_T = (11500);  // ~1155us
-static volatile int32_t RX_LOOP_T = (97);
-static volatile int32_t BIT_T_START_DELAY = (274);
+static volatile int32_t ACK_PAUSE_COMP = (142);
+static volatile int32_t RX_FWT_READ_T =
+    (21400); // ~1755us from the end of the poller's EOF bit to the start of the
+             // first bit in the next poller frame. To be able to read more than
+             // one byte at a time (aka one byte per setup phase), this timing
+             // is crucial!
+static volatile int32_t RX_FWT_WRITE_T =
+    (50600); // ~4ms is what the pm3 does, so 4ms is what we do.
+static volatile int32_t RX_FWT_ACK_T = (13500); // ~1155us
+static volatile int32_t RX_LOOP_T = (95);
+static volatile int32_t BIT_T_START_DELAY =
+    (270); // 12bits * 100us loop time + 270us start delay == 1470us --> no more
+           // than 295us left to do stuff like signal encoding or crc checking!
+
+uint16_t rx_buf[1024];
+static volatile bool bypass_crc_check = 0;
 
 static volatile int16_t irq_bits = 0;
 
@@ -37,14 +54,20 @@ static LegicPrime_Signal *legic_prime_signal = NULL;
 static uint16_t ones_before_start = 0;
 static uint16_t ones_per_slot[MAX_ANSWER_BITS] = {0};
 
-static uint8_t rx_buf[RX_BUF_DEPTH];
-static size_t rx_buf_idx = 0;
-
 static crc_t legic_crc;
 static uint32_t cmd = 0;
 static uint8_t tag_type = 0;
 static bool transparent_mode = 0;
 static bool setup_successful = 0;
+
+/*
+ * This is the most important part of this whole thing!
+ * DO NOT add any code to this isr, OR things WILL break!
+ */
+static void p_rx_cb(void *ctx) {
+  UNUSED(ctx);
+  irq_bits++;
+}
 
 // private functions
 
@@ -58,20 +81,19 @@ static uint8_t calc_crc4(uint16_t cmd, uint8_t cmd_sz, uint8_t value) {
   return crc_finish(&legic_crc);
 }
 
-static void p_rx_cb(void *ctx) {
-  UNUSED(ctx);
+static bool p_poller_crc_good(uint16_t data, size_t cmd_sz) {
 
-  // This code is basically unused, but the timing of this shit is so fragile,
-  // that if I remove it, everything breaks and no more irq_bits are counted.
-  // So, in order to spend some useless time in this ISR, this needs to stay.
-  // At least for now.
-  rx_buf[rx_buf_idx] = 1;
-  rx_buf_idx++;
-  if (rx_buf_idx >= RX_BUF_DEPTH)
-    rx_buf_idx = RX_BUF_DEPTH - 1;
+  // split frame into data and crc
+  uint8_t byte = data & 0xff;
+  uint8_t crc = (data >> 8) & 0xf;
 
-  // This is the only real work that's being done here!
-  irq_bits++;
+  // check received against calculated crc
+  uint8_t calc_crc = calc_crc4(cmd, cmd_sz, byte);
+  if (calc_crc != crc) {
+    return false;
+  } else {
+    return true;
+  }
 }
 
 static void p_enter_transparent(const FuriHalSpiBusHandle *handle) {
@@ -106,6 +128,7 @@ static void p_exit_transparent(const FuriHalSpiBusHandle *handle) {
   transparent_mode = 0;
 }
 
+#if 1
 static void p_reset_tag(const FuriHalSpiBusHandle *handle) {
   // switch off carrier and wait for 10ms to reset the tag
   st25r3916_direct_cmd(handle, ST25R3916_CMD_STOP);
@@ -114,6 +137,7 @@ static void p_reset_tag(const FuriHalSpiBusHandle *handle) {
 
   furi_delay_ms(10);
 }
+#endif
 
 FuriHalNfcError p_poller_tx(uint32_t tx_data, size_t tx_bits) {
   furi_check(legic_prime_signal);
@@ -122,13 +146,17 @@ FuriHalNfcError p_poller_tx(uint32_t tx_data, size_t tx_bits) {
   uint32_t rx_fwt = 0;
   uint32_t rx_bit_start_delay = 0;
 
-  rx_buf_idx = 0;
-  memset(rx_buf, 0, sizeof(rx_buf[0]) * RX_BUF_DEPTH);
-
-  // Send signal
+  /*
+   * Send the signal. Keep in mind that the time the encoding takes, varies with
+   * the number of bits to be encoded.
+   */
   legic_prime_signal_tx(legic_prime_signal,
                         tx_data ^ legic_prng_get_bits(tx_bits), tx_bits);
 
+  /*
+   * we can't rely on the rx command coming at a defined time, so we
+   * have to start the actual receiving of the answer right here.
+   */
   switch (tx_bits) {
   case 6:
     return FuriHalNfcErrorNone;
@@ -164,11 +192,16 @@ FuriHalNfcError p_poller_tx(uint32_t tx_data, size_t tx_bits) {
   furi_hal_gpio_add_int_callback(&gpio_spi_r_miso, p_rx_cb, NULL);
 
   // Claim highest priority, so we don't get interrupted too often!
+  // not sure if this is even necessary when the kernel is locked..
   FuriThreadPriority prio = furi_thread_get_current_priority();
   furi_thread_set_current_priority(FuriThreadPriorityHighest);
 
+  /*
+   * Start the frame wait timer.
+   */
   furi_hal_nfc_timer_fwt_start(rx_fwt);
 
+  // consider locking the kernel earlier and ditching the priority stuff
   furi_kernel_lock();
 
   uint8_t bit_idx = 0;
@@ -185,9 +218,6 @@ FuriHalNfcError p_poller_tx(uint32_t tx_data, size_t tx_bits) {
     bit_idx++;
     irq_bits = 0;
     FURI_CRITICAL_EXIT();
-    // This will throw the timing off by some number...
-    // if (furi_thread_flags_get() & FuriHalNfcEventInternalTypeTimerFwtExpired)
-    //   break;
   }
 
   furi_kernel_unlock();
@@ -199,6 +229,9 @@ FuriHalNfcError p_poller_tx(uint32_t tx_data, size_t tx_bits) {
   furi_thread_flags_wait(FuriHalNfcEventInternalTypeTimerFwtExpired,
                          FuriFlagWaitAny, FuriWaitForever);
 
+  /*
+   * With trace logging enabled, only the first setup answer can be observed.
+   */
   FURI_LOG_T(TAG, "bits before start: %d", ones_before_start);
   for (int i = 0; i < MAX_ANSWER_BITS; i++) {
     FURI_LOG_T(TAG, "bits in slot %02d: %4d", i, ones_per_slot[i]);
@@ -249,11 +282,11 @@ uint16_t p_poller_rx(size_t rx_bits) {
     }
   }
 
-  return bits ^ legic_prng_get_bits(rx_bits);
+  return (rx_bits > 1) ? bits ^ legic_prng_get_bits(rx_bits) : bits;
 }
 
 static uint8_t p_poller_setup(uint32_t timeout) {
-  uint16_t iv_frame = 0x01;
+  uint16_t iv_frame = 0x55;
   uint16_t ack_frame = 0;
   uint16_t answer_frame = 0;
 
@@ -273,7 +306,7 @@ static uint8_t p_poller_setup(uint32_t timeout) {
 
     switch (answer_frame) {
     case 0x0D:
-      // ack_frame = 0x19;
+      ack_frame = 0x19;
       FURI_LOG_E(TAG, "wrong tag type recognized: 0x%04X", answer_frame);
       break;
 
@@ -299,6 +332,37 @@ static uint8_t p_poller_setup(uint32_t timeout) {
   furi_delay_us(ACK_PAUSE_COMP);
 
   return (uint8_t)answer_frame & 0xff;
+}
+
+static bool p_read_byte(uint16_t addr, size_t cmd_sz) {
+
+  legic_prng_forward(2);
+  cmd = (addr << 1) | LegicPrimeCmdRead;
+  p_poller_tx(cmd, cmd_sz);
+  legic_prng_forward(2);
+  rx_buf[addr] = p_poller_rx(MAX_ANSWER_BITS);
+  legic_prng_forward(1);
+
+  return (p_poller_crc_good(rx_buf[addr], cmd_sz) || bypass_crc_check);
+}
+
+static bool p_write_byte(uint16_t addr, uint8_t data, size_t addr_sz) {
+
+  uint16_t cmd_sz = addr_sz + 1 + 8 + 4; // cmd_sz = addr_sz + cmd + data + crc
+
+  cmd = (addr << 1) | LegicPrimeCmdWrite;
+
+  uint8_t crc = calc_crc4(cmd, addr_sz + 1, data); // calculate crc
+  cmd |= data << (addr_sz + 1);                    // append value
+  cmd |= (crc & 0xF) << (addr_sz + 1 + 8);         // and crc
+
+  legic_prng_forward(2);
+  p_poller_tx(cmd, cmd_sz);
+  legic_prng_forward(2);
+  rx_buf[addr] = p_poller_rx(1);
+  legic_prng_forward(35);
+
+  return rx_buf[addr];
 }
 
 // public functions
@@ -508,98 +572,86 @@ furi_hal_nfc_legic_prime_poller_tx(const FuriHalSpiBusHandle *handle,
   furi_check(legic_prime_signal);
   UNUSED(tx_bits);
 
-  if (!setup_successful)
-    p_enter_transparent(handle);
+  LegicPrimePollerTrxData *trx_data = (LegicPrimePollerTrxData *)tx_data;
+  FuriHalNfcError error = FuriHalNfcErrorNone;
 
-  if (!tag_type) {
-    tag_type = p_poller_setup(tx_bits == 7 ? tx_data[0] : 10);
-  }
+  // init crc calculator
+  crc_init(&legic_crc, 4, 0x19 >> 1, 0x05, 0);
 
-  if (!tag_type) {
-    p_exit_transparent(handle);
-    return FuriHalNfcErrorNone;
-  }
+  // TODO: put this on the heap when everything runs!
+  memset(rx_buf, 0, 1024 * sizeof(uint16_t));
 
-  // If this is a tag detect command, return immediately after setup!
-  if (tx_bits == 7) {
-    return FuriHalNfcErrorNone;
-  }
+  p_enter_transparent(handle);
 
-  legic_prng_forward(2);
-  cmd = tx_data[0] | tx_data[1] << 8 | tx_data[2] << 16;
-  p_poller_tx(cmd, tx_bits);
-  legic_prng_forward(2);
+  do {
+    tag_type = p_poller_setup(MAX_RX_ERRORS);
 
-  return FuriHalNfcErrorNone;
+    // If no card is detected, we should return some kind of error!
+    if (!tag_type) {
+      error = FuriHalNfcErrorNone;
+      break;
+    }
+
+    // If this is a tag detect command, return immediately after setup!
+    if (!trx_data->tag.tagtype) {
+      error = FuriHalNfcErrorNone;
+      break;
+    }
+
+    uint8_t cmd = trx_data->cmd;
+    size_t tx_bytes = trx_data->num_addrs;
+    uint32_t error_cnt = 0;
+    bool success = false;
+
+    for (size_t i = 0; i < tx_bytes; i++) {
+      if (cmd == LegicPrimeCmdRead) {
+        success = p_read_byte(trx_data->addrs[i], trx_data->tag.cmdsize);
+      } else if (cmd == LegicPrimeCmdWrite) {
+        success = p_write_byte(trx_data->addrs[i], trx_data->write_data[i],
+                               trx_data->tag.addrsize);
+      }
+
+      if (success) {
+        error_cnt = 0;
+      } else {
+        i--;
+        error_cnt++;
+      }
+      if (error_cnt > MAX_RX_ERRORS)
+        break;
+    }
+  } while (false);
+
+  p_exit_transparent(handle);
+  p_reset_tag(handle);
+  return error;
 }
 
 FuriHalNfcError
 furi_hal_nfc_legic_prime_poller_rx(const FuriHalSpiBusHandle *handle,
                                    uint8_t *rx_data, size_t rx_data_size,
                                    size_t *rx_bits) {
+  UNUSED(handle);
   UNUSED(rx_data_size);
+
+  LegicPrimePollerTrxData *trx_data = (LegicPrimePollerTrxData *)rx_data;
 
   FuriHalNfcError error = FuriHalNfcErrorNone;
 
   do {
     // If this is the answer to a tag detect command, return immediately.
-    if (*rx_bits == 6) {
-      rx_data[0] = tag_type;
+    if (!trx_data->tag.tagtype) {
+      trx_data->tag.tagtype = tag_type;
       FURI_LOG_D(TAG, "responding to activate cmd");
-      setup_successful = 0;
-      tag_type = 0;
       break;
     }
 
-    uint16_t decoded_bits = p_poller_rx(MAX_ANSWER_BITS);
-
-    if (*rx_bits == 1) {
-      rx_data[0] = decoded_bits & 0xff;
-      rx_data[1] = (decoded_bits >> 8) & 0xff;
-      FURI_LOG_D(TAG, "responding to write cmd");
-      setup_successful = 0;
-      tag_type = 0;
-      break;
+    for (size_t i = 0; i < trx_data->num_addrs; i++) {
+      trx_data->response_data[i] = rx_buf[i] & 0xff;
+      *rx_bits = i * BITS_IN_BYTE;
     }
 
-    // split frame into data and crc
-    uint8_t byte = decoded_bits & 0xff;
-    uint8_t crc = (decoded_bits >> 8) & 0xf;
-    uint8_t cmd_sz = *rx_bits;
-
-    // init crc calculator
-    crc_init(&legic_crc, 4, 0x19 >> 1, 0x05, 0);
-
-    // check received against calculated crc
-    uint8_t calc_crc = calc_crc4(cmd, cmd_sz, byte);
-    if (calc_crc != crc) {
-      FURI_LOG_E(TAG, "!!! crc mismatch: %x != %x @ addr %ld!!!", calc_crc, crc,
-                 cmd >> 1);
-      error = FuriHalNfcErrorIncompleteFrame;
-      rx_data[0] = 0;
-      // reset tag_type, so setup is run again!
-      tag_type = 0;
-      setup_successful = 0;
-    } else {
-      // FURI_LOG_T(TAG, "CRC MATCH!!! addr: 0x%04X", h);
-      rx_data[0] = byte;
-    }
-    legic_prng_forward(1);
-
-    *rx_bits = 8;
   } while (false);
-
-  // force tag reset until there is a better way of waiting exactly 1755us after
-  // TX.
-  tag_type = 0;
-  setup_successful = 0;
-
-  if (!setup_successful)
-    p_exit_transparent(handle);
-
-  if (!tag_type) {
-    p_reset_tag(handle);
-  }
 
   return error;
 }

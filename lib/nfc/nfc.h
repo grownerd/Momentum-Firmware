@@ -398,14 +398,9 @@ NfcError nfc_iso15693_listener_tx_sof(Nfc* instance);
  * @param[in,out] instance pointer to the instance to be used in the transaction.
  * @param[in] tx_buffer pointer to the buffer containing the data to be transmitted.
  * @param[out] rx_buffer pointer to the buffer to be filled with received data.
- * @param[in] fwt frame wait time (response timeout), in carrier cycles.
  * @returns NfcErrorNone on success, any other error code on failure.
  */
-NfcError nfc_legic_prime_poller_trx(
-    Nfc* instance,
-    const BitBuffer* tx_buffer,
-    BitBuffer* rx_buffer,
-    uint32_t fwt);
+NfcError nfc_legic_prime_poller_trx(Nfc* instance, uint8_t* trx_data);
 
 #ifdef __cplusplus
 }

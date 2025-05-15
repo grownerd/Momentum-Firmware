@@ -2328,6 +2328,7 @@ Function,+,legic_prime_free,void,LegicPrimeData*
 Function,+,legic_prime_get_base_data,LegicPrimeData*,const LegicPrimeData*
 Function,+,legic_prime_get_device_name,const char*,"const LegicPrimeData*, NfcDeviceNameType"
 Function,+,legic_prime_get_uid,const uint8_t*,"const LegicPrimeData*, size_t*"
+Function,+,legic_prime_init_tag,LegicPrimeError,"LegicPrimeTagType, LegicPrimeTag*"
 Function,+,legic_prime_is_equal,_Bool,"const LegicPrimeData*, const LegicPrimeData*"
 Function,+,legic_prime_load,_Bool,"LegicPrimeData*, FlipperFormat*, uint32_t"
 Function,+,legic_prime_poller_activate,LegicPrimeError,"LegicPrimePoller*, LegicPrimeData*"
@@ -2958,7 +2959,7 @@ Function,+,nfc_iso14443a_poller_trx_custom_parity,NfcError,"Nfc*, const BitBuffe
 Function,+,nfc_iso14443a_poller_trx_sdd_frame,NfcError,"Nfc*, const BitBuffer*, BitBuffer*, uint32_t"
 Function,+,nfc_iso14443a_poller_trx_short_frame,NfcError,"Nfc*, NfcIso14443aShortFrame, BitBuffer*, uint32_t"
 Function,+,nfc_iso15693_listener_tx_sof,NfcError,Nfc*
-Function,+,nfc_legic_prime_poller_trx,NfcError,"Nfc*, const BitBuffer*, BitBuffer*, uint32_t"
+Function,+,nfc_legic_prime_poller_trx,NfcError,"Nfc*, uint8_t*"
 Function,+,nfc_listener_alloc,NfcListener*,"Nfc*, NfcProtocol, const NfcDeviceData*"
 Function,+,nfc_listener_free,void,NfcListener*
 Function,+,nfc_listener_get_data,const NfcDeviceData*,"const NfcListener*, NfcProtocol"

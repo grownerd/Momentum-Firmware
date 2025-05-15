@@ -9,11 +9,8 @@ extern "C" {
 
 #define LEGIC_PRIME_POLLER_MAX_BUFFER_SIZE (4096U)
 
-#define LEGIC_PRIME_POLLER_POLLING_FWT (0U)
-
 typedef enum {
     LegicPrimePollerStateIdle,
-    //LegicPrimePollerStateActivated,
     LegicPrimePollerStateRequestMode,
     LegicPrimePollerStateReadBlocks,
     LegicPrimePollerStateReadSuccess,
@@ -40,77 +37,17 @@ struct LegicPrimePoller {
     void* context;
 };
 
-typedef struct {
-    uint8_t num_bits;
-    uint32_t data;
-} LegicPrimePollerPollingCommand;
-
-typedef struct {
-    uint8_t num_bits;
-    uint8_t data;
-} LegicPrimePollerPollingResponse;
-
 const LegicPrimeData* legic_prime_poller_get_data(LegicPrimePoller* instance);
-
-/**
- * @brief Performs legic_prime polling operation as part of the activation process
- * 
- * @param[in, out] instance pointer to the instance to be used in the transaction.
- * @param[in] cmd Pointer to polling command structure
- * @param[out] resp Pointer to the response structure
- * @return LegicPrimeErrorNone on success, an error code on failure
-*/
-LegicPrimeError legic_prime_poller_polling(
-    LegicPrimePoller* instance,
-    const LegicPrimePollerPollingCommand* cmd,
-    LegicPrimePollerPollingResponse* resp);
-
-/**
- * @brief Reads a byte from the tag
- * 
- * @param[in, out] instance pointer to the instance to be used in the transaction.
- * @param[in] addr Address of the byte to be retrieved.
- * @param[out] response_ptr Pointer to the response structure
- * @return LegicPrimeErrorNone on success, an error code on failure.
-*/
-LegicPrimeError legic_prime_poller_read_byte(
-    LegicPrimePoller* instance,
-    uint16_t addr,
-    LegicPrimePollerReadCommandResponse** const response_ptr);
 
 /**
  * @brief Performs legic_prime write operation with data provided as parameters
  * 
  * @param[in, out] instance pointer to the instance to be used in the transaction.
- * @param[in] block_count Amount of blocks involved in writing procedure
- * @param[in] block_numbers Array with block indexes according to legic_prime docs
- * @param[in] data Data of blocks provided in block_numbers
- * @param[out] response_ptr Pointer to the response structure
+ * @param[out] trx_data Pointer to the struct that holds all trx data.
  * @return LegicPrimeErrorNone on success, an error code on failure.
 */
-LegicPrimeError legic_prime_poller_write_byte(
-    LegicPrimePoller* instance,
-    uint16_t addr,
-    uint8_t data,
-    LegicPrimePollerReadCommandResponse** const response_ptr);
-
-/**
- * @brief Perform frame exchange procedure.
- *
- * Prepares data for sending by adding crc, after that performs
- * low level calls to send package data to the card
- *
- * @param[in, out] instance pointer to the instance to be used in the transaction.
- * @param[in] tx_buffer pointer to the buffer with data to be transmitted
- * @param[out] rx_buffer pointer to the buffer with received data from card
- * @param[in] fwt timeout window
- * @return LegicPrimeErrorNone on success, an error code on failure.
- */
-LegicPrimeError legic_prime_poller_frame_exchange(
-    const LegicPrimePoller* instance,
-    const BitBuffer* tx_buffer,
-    BitBuffer* rx_buffer,
-    uint32_t fwt);
+LegicPrimeError
+    legic_prime_poller_trx(LegicPrimePoller* instance, LegicPrimePollerTrxData* trx_data);
 
 #ifdef __cplusplus
 }

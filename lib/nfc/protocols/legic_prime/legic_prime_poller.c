@@ -1,5 +1,6 @@
 #include "protocols/legic_prime/legic_prime_poller.h"
 #include "legic_prime_poller_i.h"
+#include "protocols/legic_prime/legic_prime.h"
 
 #include <nfc/protocols/nfc_poller_base.h>
 
@@ -21,11 +22,11 @@ static LegicPrimePoller *legic_prime_poller_alloc(Nfc *nfc) {
   furi_assert(nfc);
   LegicPrimePoller *instance = malloc(sizeof(LegicPrimePoller));
   instance->nfc = nfc;
-  instance->tx_buffer = bit_buffer_alloc(LEGIC_PRIME_POLLER_MAX_BUFFER_SIZE);
-  instance->rx_buffer = bit_buffer_alloc(LEGIC_PRIME_POLLER_MAX_BUFFER_SIZE);
 
   nfc_config(instance->nfc, NfcModePoller, NfcTechLegicPrime);
 #if 0
+  instance->tx_buffer = bit_buffer_alloc(LEGIC_PRIME_POLLER_MAX_BUFFER_SIZE);
+  instance->rx_buffer = bit_buffer_alloc(LEGIC_PRIME_POLLER_MAX_BUFFER_SIZE);
     nfc_set_guard_time_us(instance->nfc, LEGIC_PRIME_GUARD_TIME_US);
     nfc_set_fdt_poll_fc(instance->nfc, LEGIC_PRIME_FDT_POLL_FC);
     nfc_set_fdt_poll_poll_us(instance->nfc, LEGIC_PRIME_POLL_POLL_MIN_US);
@@ -52,12 +53,12 @@ static void legic_prime_poller_free(LegicPrimePoller *instance) {
   furi_assert(instance->rx_buffer);
   furi_assert(instance->data);
 
-#if 1
+#if 0
   bit_buffer_free(instance->tx_buffer);
   bit_buffer_free(instance->rx_buffer);
+#endif
   legic_prime_free(instance->data);
   free(instance);
-#endif
 }
 
 static void legic_prime_poller_set_callback(LegicPrimePoller *instance,
@@ -112,31 +113,37 @@ NfcCommand
 legic_prime_poller_state_handler_read_blocks(LegicPrimePoller *instance) {
   FURI_LOG_D(TAG, "Read Blocks");
 
-  LegicPrimePollerReadCommandResponse *response;
+  LegicPrimePollerTrxData *trx_data = malloc(sizeof(LegicPrimePollerTrxData));
 
+  size_t tag_sz = instance->data->tag.cardsize;
   instance->data->blocks_read = 0;
-  for (int i = 0; i < instance->data->tag.cardsize; i++) {
-    LegicPrimeError error =
-        legic_prime_poller_read_byte(instance, i, &response);
-    if (error == LegicPrimeErrorNone) {
-      uint8_t *data_ptr = instance->data->data;
 
-      uint8_t *response_data_ptr = response->foo;
-      uint8_t read_byte = response_data_ptr[0];
-      // uint8_t read_byte =
-      //     i < 22 ? response_data_ptr[0] : response_data_ptr[0] ^ data_ptr[4];
-      instance->data->blocks_read++;
-      memcpy(data_ptr + i, &read_byte, LEGIC_PRIME_DATA_BLOCK_SIZE);
-      instance->state = LegicPrimePollerStateReadSuccess;
+  memcpy(&trx_data->tag, &instance->data->tag, sizeof(LegicPrimeTag));
+  trx_data->cmd = LegicPrimeCmdRead;
+  trx_data->num_addrs = trx_data->tag.cardsize;
 
-      FURI_LOG_I(TAG, "Read byte %3d: 0x%02X", i, response_data_ptr[0]);
-    } else {
-      instance->legic_prime_event.type = LegicPrimePollerEventTypeFail;
-      instance->legic_prime_event_data.error = error;
-      instance->state = LegicPrimePollerStateReadFailed;
-      i--;
-    }
+  for (size_t i = 0; i < tag_sz; i++) {
+    trx_data->addrs[i] = i;
   }
+
+  LegicPrimeError error = legic_prime_poller_trx(instance, trx_data);
+
+  if (error == LegicPrimeErrorNone) {
+    uint8_t *data_ptr = instance->data->data;
+    uint8_t *response_data_ptr = trx_data->response_data;
+
+    instance->data->blocks_read = trx_data->tag.cardsize;
+    memcpy(data_ptr, response_data_ptr, LEGIC_PRIME_DATA_BLOCK_SIZE);
+    instance->state = LegicPrimePollerStateReadSuccess;
+
+    // FURI_LOG_I(TAG, "Read byte %3d: 0x%02X", i, response_data_ptr[0]);
+  } else {
+    instance->legic_prime_event.type = LegicPrimePollerEventTypeFail;
+    instance->legic_prime_event_data.error = error;
+    instance->state = LegicPrimePollerStateReadFailed;
+  }
+
+  free(trx_data);
   return NfcCommandContinue;
 }
 
@@ -144,39 +151,44 @@ NfcCommand
 legic_prime_poller_state_handler_write_blocks(LegicPrimePoller *instance) {
   FURI_LOG_D(TAG, "Write Blocks");
 
-  LegicPrimePollerReadCommandResponse *response;
+  LegicPrimePollerTrxData *trx_data = malloc(sizeof(LegicPrimePollerTrxData));
 
-  uint16_t blocks_to_write = 0;
-  uint16_t blocks_written = 0;
-  for (int i = 7; i < instance->data->tag.cardsize; i++) {
+  size_t tag_sz = instance->data->tag.cardsize;
+
+  memcpy(&trx_data->tag, &instance->data->tag, sizeof(LegicPrimeTag));
+  trx_data->cmd = LegicPrimeCmdWrite;
+
+  size_t idx = 0;
+
+  // Go backwards, because bytes 5 and 6 can only be written in reverse order.
+  for (int i = tag_sz; i > 6; i--) {
+
     LegicPrimePollerEvent event = instance->legic_prime_event;
     uint8_t *write_mask = event.write_mask;
-    uint8_t byte = event.write_data->data[i];
 
     if (write_mask[i]) {
-      blocks_to_write++;
-      LegicPrimeError error =
-          legic_prime_poller_write_byte(instance, i, byte, &response);
-
-      if (error == LegicPrimeErrorNone) {
-
-        uint8_t *response_data_ptr = response->foo;
-        blocks_written++;
-        instance->state = LegicPrimePollerStateWriteSuccess;
-
-        FURI_LOG_I(TAG, "Wrote byte %3d: 0x%02X, response: 0x%03X", i, byte,
-                   response_data_ptr[0]);
-      } else {
-        instance->legic_prime_event.type = LegicPrimePollerEventTypeFail;
-        instance->legic_prime_event_data.error = error;
-        instance->state = LegicPrimePollerStateWriteFailed;
-        i--;
-      }
+      trx_data->addrs[idx] = i;
+      trx_data->write_data[idx] = event.write_data->data[i];
+      idx++;
     }
   }
-  if (blocks_written == blocks_to_write)
-    instance->state = LegicPrimePollerStateWriteSuccess;
+  trx_data->num_addrs = idx - 1;
 
+  LegicPrimeError error = legic_prime_poller_trx(instance, trx_data);
+
+  if (error == LegicPrimeErrorNone) {
+    // uint8_t *response_data_ptr = trx_data->response_data;
+    // FURI_LOG_I(TAG, "Wrote byte %3d: 0x%02X, response: 0x%03X", i, byte,
+    // response_data_ptr[0]);
+
+    instance->state = LegicPrimePollerStateWriteSuccess;
+  } else {
+    instance->legic_prime_event.type = LegicPrimePollerEventTypeFail;
+    instance->legic_prime_event_data.error = error;
+    instance->state = LegicPrimePollerStateWriteFailed;
+  }
+
+  free(trx_data);
   return NfcCommandContinue;
 }
 

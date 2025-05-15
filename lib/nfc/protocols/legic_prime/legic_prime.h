@@ -7,12 +7,11 @@
 extern "C" {
 #endif
 
-#define LEGIC_PRIME_DATA_BLOCK_SIZE (1U)
+#define LEGIC_PRIME_DATA_BLOCK_SIZE (1024U)
 
-#define LEGIC_PRIME_GUARD_TIME_US     (0)
-#define LEGIC_PRIME_FDT_POLL_FC       (0)
-#define LEGIC_PRIME_POLL_POLL_MIN_US  (0)
-
+#define LEGIC_PRIME_GUARD_TIME_US    (0)
+#define LEGIC_PRIME_FDT_POLL_FC      (0)
+#define LEGIC_PRIME_POLL_POLL_MIN_US (0)
 
 /** @brief Type of possible LegicPrime errors */
 typedef enum {
@@ -53,10 +52,19 @@ typedef struct {
 } LegicPrimeData;
 
 typedef struct {
-    uint8_t foo[1];
-} LegicPrimePollerReadCommandResponse;
-
-typedef LegicPrimePollerReadCommandResponse LegicPrimePollerWriteCommandResponse;
+    LegicPrimeCmd cmd;
+    LegicPrimeTag tag;
+    uint16_t num_addrs;
+    uint16_t addrs[1024];
+    union {
+        uint8_t write_data[1024];
+        uint8_t response_data[1024];
+    };
+    union {
+        uint16_t bytes_read;
+        uint16_t bytes_written;
+    };
+} LegicPrimePollerTrxData;
 
 extern const NfcDeviceBase nfc_device_legic_prime;
 
@@ -83,6 +91,8 @@ const uint8_t* legic_prime_get_uid(const LegicPrimeData* data, size_t* uid_len);
 bool legic_prime_set_uid(LegicPrimeData* data, const uint8_t* uid, size_t uid_len);
 
 LegicPrimeData* legic_prime_get_base_data(const LegicPrimeData* data);
+
+LegicPrimeError legic_prime_init_tag(LegicPrimeTagType cardtype, LegicPrimeTag* p_card);
 
 #ifdef __cplusplus
 }
