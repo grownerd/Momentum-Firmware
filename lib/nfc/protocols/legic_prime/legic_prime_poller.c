@@ -134,9 +134,11 @@ legic_prime_poller_state_handler_read_blocks(LegicPrimePoller *instance) {
 
     instance->data->blocks_read = trx_data->tag.cardsize;
     memcpy(data_ptr, response_data_ptr, LEGIC_PRIME_DATA_BLOCK_SIZE);
-    instance->state = LegicPrimePollerStateReadSuccess;
 
-    // FURI_LOG_I(TAG, "Read byte %3d: 0x%02X", i, response_data_ptr[0]);
+    FURI_LOG_I(TAG, "Read %d bytes with %d retries", trx_data->bytes_processed,
+               trx_data->total_errors);
+
+    instance->state = LegicPrimePollerStateReadSuccess;
   } else {
     instance->legic_prime_event.type = LegicPrimePollerEventTypeFail;
     instance->legic_prime_event_data.error = error;
@@ -177,10 +179,8 @@ legic_prime_poller_state_handler_write_blocks(LegicPrimePoller *instance) {
   LegicPrimeError error = legic_prime_poller_trx(instance, trx_data);
 
   if (error == LegicPrimeErrorNone) {
-    // uint8_t *response_data_ptr = trx_data->response_data;
-    // FURI_LOG_I(TAG, "Wrote byte %3d: 0x%02X, response: 0x%03X", i, byte,
-    // response_data_ptr[0]);
-
+    FURI_LOG_I(TAG, "Wrote %d bytes with %d retries", trx_data->bytes_processed,
+               trx_data->total_errors);
     instance->state = LegicPrimePollerStateWriteSuccess;
   } else {
     instance->legic_prime_event.type = LegicPrimePollerEventTypeFail;

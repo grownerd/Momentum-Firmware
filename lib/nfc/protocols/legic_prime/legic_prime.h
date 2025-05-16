@@ -60,10 +60,8 @@ typedef struct {
         uint8_t write_data[1024];
         uint8_t response_data[1024];
     };
-    union {
-        uint16_t bytes_read;
-        uint16_t bytes_written;
-    };
+    uint16_t bytes_processed;
+    uint16_t total_errors;
 } LegicPrimePollerTrxData;
 
 extern const NfcDeviceBase nfc_device_legic_prime;

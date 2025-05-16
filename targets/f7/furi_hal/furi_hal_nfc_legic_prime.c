@@ -613,12 +613,16 @@ furi_hal_nfc_legic_prime_poller_tx(const FuriHalSpiBusHandle *handle,
 
       if (success) {
         error_cnt = 0;
+        trx_data->bytes_processed++;
       } else {
         i--;
         error_cnt++;
+        trx_data->total_errors++;
       }
-      if (error_cnt > MAX_RX_ERRORS)
+      if (error_cnt > MAX_RX_ERRORS) {
+        error = FuriHalNfcErrorIncompleteFrame;
         break;
+      }
     }
   } while (false);
 
