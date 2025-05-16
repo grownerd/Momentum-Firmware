@@ -137,7 +137,6 @@ legic_prime_poller_state_handler_read_blocks(LegicPrimePoller *instance) {
 
     FURI_LOG_I(TAG, "Read %d bytes with %d retries", trx_data->bytes_processed,
                trx_data->total_errors);
-
     instance->state = LegicPrimePollerStateReadSuccess;
   } else {
     instance->legic_prime_event.type = LegicPrimePollerEventTypeFail;
@@ -174,7 +173,7 @@ legic_prime_poller_state_handler_write_blocks(LegicPrimePoller *instance) {
       idx++;
     }
   }
-  trx_data->num_addrs = idx - 1;
+  trx_data->num_addrs = idx;
 
   LegicPrimeError error = legic_prime_poller_trx(instance, trx_data);
 
