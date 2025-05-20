@@ -432,7 +432,6 @@ static int32_t p_listener_rx(uint8_t *len, int32_t *raw) {
   while (true) {
     furi_delay_us(LISTENER_LOOP_T);
 
-    // FURI_CRITICAL_ENTER();
     if (irq_bits) {
       diff = loop_idx - last_bit_idx;
       if (pause_detected) {
@@ -460,7 +459,6 @@ static int32_t p_listener_rx(uint8_t *len, int32_t *raw) {
       irq_bits = 0;
       bit_debug[bit_dbg_idx++] = diff;
     }
-    // FURI_CRITICAL_EXIT();
     loop_idx++;
     if (!loop_timeout-- && !bit_idx) {
       FURI_LOG_T(TAG, "Listener RX Timeout!");
@@ -781,10 +779,6 @@ furi_hal_nfc_legic_prime_listener_init(const FuriHalSpiBusHandle *handle) {
   furi_check(legic_prime_signal == NULL);
   legic_prime_signal = legic_prime_signal_alloc(&gpio_spi_r_mosi);
 
-  furi_check(sim_tag == NULL);
-  sim_tag = malloc(sizeof(LegicPrimeData));
-  memset(sim_tag, 0, sizeof(LegicPrimeData));
-
   st25r3916_write_reg(handle, ST25R3916_REG_MODE,
                       ST25R3916_REG_MODE_targ_targ |
                           ST25R3916_REG_MODE_om_subcarrier_stream |
@@ -819,10 +813,6 @@ furi_hal_nfc_legic_prime_listener_deinit(const FuriHalSpiBusHandle *handle) {
   if (legic_prime_signal) {
     legic_prime_signal_free(legic_prime_signal);
     legic_prime_signal = NULL;
-  }
-  if (sim_tag) {
-    free(sim_tag);
-    sim_tag = NULL;
   }
 
   return FuriHalNfcErrorNone;
@@ -870,12 +860,15 @@ furi_hal_nfc_legic_prime_listener_tx(const FuriHalSpiBusHandle *handle,
                                      const uint8_t *tx_data, size_t tx_bits) {
   UNUSED(handle);
   UNUSED(tx_bits);
-  furi_check(sim_tag != NULL);
+  furi_check(sim_tag == NULL);
 
   FuriHalNfcError error = FuriHalNfcErrorNone;
 
+  sim_tag = malloc(sizeof(LegicPrimeData));
+  memset(sim_tag, 0, sizeof(LegicPrimeData));
+
   LegicPrimeListenerTrxData *trx_data = (LegicPrimeListenerTrxData *)tx_data;
-  memcpy(sim_tag, &(trx_data->data), sizeof(LegicPrimeData));
+  memcpy(sim_tag, &trx_data->data, sizeof(LegicPrimeData));
 
   return error;
 }
@@ -890,8 +883,12 @@ furi_hal_nfc_legic_prime_listener_rx(const FuriHalSpiBusHandle *handle,
   furi_check(sim_tag != NULL);
 
   LegicPrimeListenerTrxData *trx_data = (LegicPrimeListenerTrxData *)rx_data;
-  memcpy(&(trx_data->data), sim_tag, sizeof(LegicPrimeData));
+  memcpy(&trx_data->data, sim_tag, sizeof(LegicPrimeData));
 
+  if (sim_tag) {
+    free(sim_tag);
+    sim_tag = NULL;
+  }
   return FuriHalNfcErrorNone;
 }
 
