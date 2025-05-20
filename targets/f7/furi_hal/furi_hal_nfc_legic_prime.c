@@ -1,3 +1,4 @@
+#include "furi_hal_nfc.h"
 #include "furi_hal_nfc_i.h"
 #include "furi_hal_nfc_tech_i.h"
 
@@ -44,6 +45,30 @@ static volatile int32_t BIT_T_START_DELAY =
     (270); // 12bits * 100us loop time + 270us start delay == 1470us --> no more
            // than 295us left to do stuff like signal encoding or crc checking!
 
+static volatile int32_t LISTENER_BIT_ENCODE_US =
+    (3); // ~3us, the time it takes to encode a bit (apparently).
+static volatile int32_t LISTENER_TX_DELAY_US = (5);     // ~330us
+static volatile int32_t LISTENER_TX_DELAY_T = (760);    // ~330us
+static volatile int32_t LISTENER_ACK_DELAY_US = (3400); // ~3.5ms
+static volatile int32_t LISTENER_LOOP_T = (1);
+static volatile int32_t LISTENER_ONE_T = (35);
+static volatile int32_t LISTENER_ZERO_T = (18);
+static volatile int32_t LISTENER_PAUSE_T = (5);
+static volatile int32_t LISTENER_BIT_T = (41); // one_t + pause_t
+static volatile int32_t LISTENER_BIT_TOL_T = (4);
+static volatile int32_t LISTENER_TIMEOUT_T =
+    (41); // shorten this no more than  one_t + pause_t
+static volatile int32_t LISTENER_FRAME_TIMEOUT_T =
+    (3000); // reader carrier is switched on 5ms before IV cmd (in case of pm3)
+static volatile bool bit_debugging_enabled = false;
+static volatile uint32_t debug_bit_idx = 0;
+
+static volatile int32_t rng_steps_rx = (3);
+static volatile int32_t rng_steps_tx = (2);
+static volatile int32_t rng_steps_setup_back = (1);
+static volatile int32_t rng_steps_write_ack = (35);
+
+static uint8_t legic_mem[1024];
 uint16_t rx_buf[1024];
 static volatile bool bypass_crc_check = 0;
 
@@ -151,7 +176,7 @@ FuriHalNfcError p_poller_tx(uint32_t tx_data, size_t tx_bits) {
    * the number of bits to be encoded.
    */
   legic_prime_signal_tx(legic_prime_signal,
-                        tx_data ^ legic_prng_get_bits(tx_bits), tx_bits);
+                        tx_data ^ legic_prng_get_bits(tx_bits), tx_bits, true);
 
   /*
    * we can't rely on the rx command coming at a defined time, so we
@@ -307,7 +332,7 @@ static uint8_t p_poller_setup(uint32_t timeout) {
     switch (answer_frame) {
     case 0x0D:
       ack_frame = 0x19;
-      FURI_LOG_E(TAG, "wrong tag type recognized: 0x%04X", answer_frame);
+      FURI_LOG_T(TAG, "wrong tag type recognized: 0x%04X", answer_frame);
       break;
 
     case 0x1D:
@@ -316,7 +341,7 @@ static uint8_t p_poller_setup(uint32_t timeout) {
       break;
 
     default:
-      FURI_LOG_E(TAG, "tag type not recognized: 0x%04X", answer_frame);
+      FURI_LOG_T(TAG, "tag type not recognized: 0x%04X", answer_frame);
       answer_frame = 0;
       break;
     }
@@ -365,6 +390,334 @@ static bool p_write_byte(uint16_t addr, uint8_t data, size_t addr_sz) {
   return rx_buf[addr];
 }
 
+/*
+ * Private Listener functions
+ */
+static int32_t p_listener_rx(uint8_t *len, int32_t *raw) {
+  furi_check(legic_prime_signal);
+
+  int32_t raw_frame = 0;
+  int32_t xored_frame = 0;
+  int prng_steps = 0;
+
+  // configure miso gpio as interrupt pin and add callback to fill buffer
+  furi_hal_gpio_init(&gpio_spi_r_miso, GpioModeInterruptRiseFall, GpioPullDown,
+                     GpioSpeedVeryHigh);
+  furi_hal_gpio_add_int_callback(&gpio_spi_r_miso, p_rx_cb, NULL);
+
+  // Claim highest priority, so we don't get interrupted too often!
+  // not sure if this is even necessary when the kernel is locked..
+  // FuriThreadPriority prio = furi_thread_get_current_priority();
+  // furi_thread_set_current_priority(FuriThreadPriorityHighest);
+
+  // consider locking the kernel earlier and ditching the priority stuff
+  furi_kernel_lock();
+
+  int bit_errors[32];
+  int bit_debug[32];
+  int bit_err_idx = 0;
+  int bit_dbg_idx = 0;
+  if (bit_debugging_enabled) {
+    memset(bit_errors, 0, sizeof(int) * 32);
+    memset(bit_debug, 0, sizeof(int) * 32);
+  }
+  uint16_t loop_timeout = 4000; // 8ms @ 2us loop delay.
+  uint16_t loop_idx = 0;
+  uint16_t bit_idx = 0;
+  uint16_t last_bit_idx = 0;
+  static uint16_t diff = 0;
+  bool pause_detected = false;
+  irq_bits = 0;
+
+  // Wait for first pause and record loop iterations for prng adjustment
+#if 0
+  while (true) {
+    furi_delay_us(LISTENER_LOOP_T);
+
+    if (irq_bits) {
+      diff = loop_idx - last_bit_idx;
+      last_bit_idx = loop_idx;
+      irq_bits = 0;
+      bit_debug[bit_dbg_idx++] = diff;
+      if (is_within_tolerance(diff, LISTENER_PAUSE_T, LISTENER_BIT_TOL_T)) {
+        pause_detected = true;
+        break;
+      }
+    } else if (loop_idx > LISTENER_FRAME_TIMEOUT_T) {
+      // FURI_LOG_T(TAG, "frame wait timeout: %d", loop_idx);
+      break;
+    }
+
+    loop_idx++;
+  }
+  prng_steps = loop_idx / LISTENER_BIT_T;
+  loop_idx++;
+#endif
+
+  // Everything from here on out is either a bit or an error!
+  while (true) {
+    furi_delay_us(LISTENER_LOOP_T);
+
+    // FURI_CRITICAL_ENTER();
+    if (irq_bits) {
+      diff = loop_idx - last_bit_idx;
+      if (pause_detected) {
+        if (is_within_tolerance(diff, LISTENER_ONE_T, LISTENER_BIT_TOL_T)) {
+          // This is a ONE
+          raw_frame |= 1 << bit_idx++;
+        } else if (is_within_tolerance(diff, LISTENER_ZERO_T,
+                                       LISTENER_BIT_TOL_T)) {
+          // This is a ZERO
+          raw_frame |= 0 << bit_idx++;
+#if 0
+        } else if (is_within_tolerance(diff, LISTENER_PAUSE_T,
+                                       LISTENER_BIT_TOL_T)) {
+          // Ignore additional pause (where does this even come from?!)
+#endif
+        } else if (diff > LISTENER_TIMEOUT_T) {
+          prng_steps += diff;
+        } else {
+          bit_errors[bit_err_idx++] = diff;
+        }
+        pause_detected = false;
+      } else if (is_within_tolerance(diff, LISTENER_PAUSE_T,
+                                     LISTENER_BIT_TOL_T)) {
+        pause_detected = true;
+#if 1
+      } else if (bit_idx) {
+        bit_errors[bit_err_idx++] = diff;
+#endif
+      }
+
+      last_bit_idx = loop_idx;
+      irq_bits = 0;
+      bit_debug[bit_dbg_idx++] = diff;
+    }
+    // FURI_CRITICAL_EXIT();
+    loop_idx++;
+    if (!loop_timeout--)
+      break;
+
+    if (bit_err_idx >= 32 || bit_dbg_idx >= 32)
+      break;
+
+    if ((bit_idx) && ((loop_idx - last_bit_idx) > LISTENER_TIMEOUT_T)) {
+      break;
+    }
+  }
+
+  // start the tx fwt as soon as possible!
+  furi_hal_nfc_timer_fwt_start(LISTENER_TX_DELAY_T);
+  // Unlock kernel, set prio back to normal, disable irq
+  furi_kernel_unlock();
+  // furi_thread_set_current_priority(prio);
+  furi_hal_gpio_remove_int_callback(&gpio_spi_r_miso);
+
+  if (bit_err_idx) {
+    FURI_LOG_T(TAG, "raw_frame: 0x%08lX bit errors: %d", raw_frame,
+               bit_err_idx);
+    for (int i = 0; i < 32; i++) {
+      FURI_LOG_T(TAG, "bit error: idx: %d, diff: %d", i, bit_errors[i]);
+    }
+  }
+  if (bit_debugging_enabled && bit_idx == debug_bit_idx) {
+    FURI_LOG_D(TAG,
+               "raw_frame: 0x%08lX, xored_frame: 0%08lX, "
+               "len: %d rng steps: %ld",
+               raw_frame, xored_frame, bit_idx, legic_prng_get_count());
+    for (int i = 0; i < 32; i++) {
+      FURI_LOG_D(TAG, "bit idx: %d, diff: %d", i, bit_debug[i]);
+    }
+  }
+  if (bit_idx == 8) {
+    FURI_LOG_E(TAG,
+               "wrong bit length! raw_frame: 0x%08lX, xored_frame: 0%08lX, "
+               "len: %d rng steps: %ld",
+               raw_frame, xored_frame, bit_idx, legic_prng_get_count());
+    for (int i = 0; i < 32; i++) {
+      FURI_LOG_E(TAG, "bit idx: %d, diff: %d", i, bit_debug[i]);
+    }
+    memset(bit_errors, 0, sizeof(int) * 32);
+  }
+
+  // legic_prng_forward(prng_steps / LISTENER_BIT_T);
+  legic_prng_forward(rng_steps_rx);
+  xored_frame = raw_frame ^ legic_prng_get_bits(bit_idx);
+
+  *raw = raw_frame;
+  *len = bit_idx;
+  return xored_frame;
+}
+
+static void p_listener_tx(uint32_t tx_data, size_t tx_bits) {
+
+  furi_thread_flags_wait(FuriHalNfcEventInternalTypeTimerFwtExpired,
+                         FuriFlagWaitAny, FuriWaitForever);
+  furi_hal_nfc_timer_fwt_stop();
+  // The value of this delay depends on the number of one-bits to encode
+  // for the answer!
+  // int delay_us = tx_bits * LISTENER_BIT_ENCODE_US + LISTENER_TX_DELAY_US;
+  // furi_delay_us(delay_us);
+  legic_prng_forward(rng_steps_tx);
+  legic_prime_signal_tx(legic_prime_signal,
+                        tx_data ^ legic_prng_get_bits(tx_bits), tx_bits, false);
+}
+
+static void p_listener_tx_ack(void) {
+  legic_prng_forward(rng_steps_write_ack);
+  furi_delay_us(LISTENER_ACK_DELAY_US);
+  legic_prime_signal_tx(legic_prime_signal, 1, 1, false);
+  legic_prng_forward(1);
+}
+
+// Setup reader to card connection
+//
+// The setup consists of a three way handshake:
+//  - Receive initialisation vector 7 bits
+//  - Transmit card type 6 bits
+//  - Receive Acknowledge 6 bits
+static FuriHalNfcError p_listener_setup_phase(LegicPrimeTag *p_card) {
+  uint8_t len = 0;
+
+  // reset prng
+  legic_prng_init(0);
+
+  // wait for iv
+  int32_t raw = 0;
+  int32_t iv = p_listener_rx(&len, &raw);
+  if ((len != 7) || (iv < 0)) {
+    FURI_LOG_T(TAG,
+               "Listener setup phase: no/wrong IV received! iv: 0x%02lX, raw: "
+               "0x%02lX, len: %d",
+               iv, raw, len);
+    return FuriHalNfcErrorCommunicationTimeout;
+  }
+
+  // configure prng
+  legic_prng_init(iv);
+
+  // reply with card type
+  switch (p_card->tagtype) {
+  case LegicPrimeTagTypeMim22:
+    p_listener_tx(0x0D, 6);
+    break;
+  case LegicPrimeTagTypeMim256:
+    p_listener_tx(0x1D, 6);
+    break;
+  case LegicPrimeTagTypeMim1024:
+    p_listener_tx(0x3D, 6);
+    break;
+  }
+
+  // wait for ack
+  int32_t ack = p_listener_rx(&len, &raw);
+  // stop the fwt, because the next rx command will try to start it, which wont
+  // succeed, if already started/expired!
+  furi_hal_nfc_timer_fwt_stop();
+  if ((len != 6) || (ack < 0)) {
+    FURI_LOG_T(
+        TAG,
+        "Listener setup phase: no/wrong ACK received! ack: 0x%02lX, len: %d",
+        ack, len);
+    return FuriHalNfcErrorCommunicationTimeout;
+  }
+
+  // validate data
+  switch (p_card->tagtype) {
+  case LegicPrimeTagTypeMim22:
+    if (ack != 0x19) {
+      FURI_LOG_T(
+          TAG,
+          "Listener setup phase: ACK mismatch! ack: 0x%02lX, prng count %ld",
+          ack, legic_prng_get_count());
+      return FuriHalNfcErrorCommunication;
+    }
+    break;
+  case LegicPrimeTagTypeMim256:
+    if (ack != 0x39) {
+      FURI_LOG_T(
+          TAG,
+          "Listener setup phase: ACK mismatch! ack: 0x%02lX, prng count %ld",
+          ack, legic_prng_get_count());
+      return FuriHalNfcErrorCommunication;
+    }
+    break;
+  case LegicPrimeTagTypeMim1024:
+    if (ack != 0x39) {
+      FURI_LOG_T(
+          TAG,
+          "Listener setup phase: ACK mismatch! ack: 0x%02lX, prng count %ld",
+          ack, legic_prng_get_count());
+      return FuriHalNfcErrorCommunication;
+    }
+    break;
+  }
+  legic_prng_backup(rng_steps_setup_back);
+  return FuriHalNfcErrorNone;
+}
+
+static FuriHalNfcError p_listener_connected_phase(LegicPrimeTag *p_card,
+                                                  uint16_t *bytes_read,
+                                                  uint16_t *bytes_written) {
+  uint8_t len = 0;
+  int32_t raw = 0;
+
+  // wait for command
+  int32_t cmd = p_listener_rx(&len, &raw);
+  if (cmd < 0) {
+    return FuriHalNfcErrorCommunicationTimeout;
+  }
+
+  // check if command is LEGIC_READ
+  if (len == p_card->cmdsize) {
+    // prepare data
+    uint8_t byte = legic_mem[cmd >> 1];
+    uint8_t crc = calc_crc4(cmd, p_card->cmdsize, byte);
+
+    // transmit data
+    p_listener_tx((crc << 8) | byte, 12);
+    (*bytes_read)++;
+    return FuriHalNfcErrorNone;
+  }
+
+  // check if command is LEGIC_WRITE
+  if (len == p_card->cmdsize + 8 + 4) {
+    // decode data
+    uint16_t mask = (1 << p_card->addrsize) - 1;
+    uint16_t addr = (cmd >> 1) & mask;
+    uint8_t byte = (cmd >> p_card->cmdsize) & 0xff;
+    uint8_t crc = (cmd >> (p_card->cmdsize + 8)) & 0xf;
+
+    // check received against calculated crc
+    uint8_t calc_crc = calc_crc4(addr << 1, p_card->cmdsize, byte);
+    if (calc_crc != crc) {
+      FURI_LOG_T(
+          TAG,
+          "!!! crc mismatch: %x != %x @ addr: %02x, data: %02x, addr_sz: "
+          "%d, cmd_sz: %d !!!",
+          calc_crc, crc, addr, byte, p_card->addrsize, p_card->cmdsize);
+      return FuriHalNfcErrorCommunication;
+    }
+
+    FURI_LOG_D(TAG, "Write successful @ addr: %02x, data: %02x", addr, byte);
+    // store data
+    legic_mem[addr] = byte;
+
+    // transmit ack
+    p_listener_tx_ack();
+    (*bytes_written)++;
+    return FuriHalNfcErrorNone;
+  }
+  if (len) {
+    FURI_LOG_E(TAG,
+               "Listener data error! rx data: 0x%08lX, raw: 0x%08lX, bits: %d "
+               "rng steps: %ld",
+               cmd, raw, len, legic_prng_get_count());
+  }
+
+  return FuriHalNfcErrorCommunicationTimeout;
+}
+
 // public functions
 
 // This function is used by poller and listener init functions
@@ -388,15 +741,12 @@ furi_hal_nfc_legic_prime_common_init(const FuriHalSpiBusHandle *handle) {
   st25r3916_write_reg(handle, ST25R3916_REG_CORR_CONF1, 0x00);
   st25r3916_write_reg(handle, ST25R3916_REG_CORR_CONF2, 0x00);
 
-  // TX driver full AM modulation (40%)
+  // TX driver full AM modulation (40%) This may be only for listener mode.
+  // Also, this doesn't seem to make much of a difference.
   st25r3916_write_reg(handle, ST25R3916_REG_TX_DRIVER,
                       ST25R3916_REG_TX_DRIVER_am_mod_40percent);
 
-  // Stream mode config
-  st25r3916_write_reg(handle, ST25R3916_REG_MODE,
-                      ST25R3916_REG_MODE_om_subcarrier_stream |
-                          ST25R3916_REG_MODE_tr_am_ook);
-
+  // Stream mode config.
   st25r3916_write_reg(handle, ST25R3916_REG_STREAM_MODE,
                       ST25R3916_REG_STREAM_MODE_scf_sc212 |
                           ST25R3916_REG_STREAM_MODE_stx_212 |
@@ -417,6 +767,12 @@ furi_hal_nfc_legic_prime_poller_init(const FuriHalSpiBusHandle *handle) {
                       ST25R3916_REG_OP_CONTROL_en |
                           ST25R3916_REG_OP_CONTROL_rx_en |
                           ST25R3916_REG_OP_CONTROL_en_fd_auto_efd);
+
+  // Operation mode config.
+  // mode.
+  st25r3916_write_reg(handle, ST25R3916_REG_MODE,
+                      ST25R3916_REG_MODE_om_subcarrier_stream |
+                          ST25R3916_REG_MODE_tr_am_ook);
 
   return furi_hal_nfc_legic_prime_common_init(handle);
 }
@@ -443,15 +799,17 @@ furi_hal_nfc_legic_prime_listener_init(const FuriHalSpiBusHandle *handle) {
   furi_check(legic_prime_signal == NULL);
   legic_prime_signal = legic_prime_signal_alloc(&gpio_spi_r_mosi);
 
-#if 1
-  UNUSED(handle);
-#else
+  st25r3916_write_reg(handle, ST25R3916_REG_MODE,
+                      ST25R3916_REG_MODE_targ_targ |
+                          ST25R3916_REG_MODE_om_subcarrier_stream |
+                          ST25R3916_REG_MODE_tr_am_ook);
+  // This is the same in inits and de-inits all over the place.
   st25r3916_write_reg(handle, ST25R3916_REG_OP_CONTROL,
                       ST25R3916_REG_OP_CONTROL_en |
                           ST25R3916_REG_OP_CONTROL_rx_en |
                           ST25R3916_REG_OP_CONTROL_en_fd_auto_efd);
-  st25r3916_write_reg(handle, ST25R3916_REG_MODE,
-                      ST25R3916_REG_MODE_targ_targ | ST25R3916_REG_MODE_om0);
+
+#if 0
   st25r3916_write_reg(handle, ST25R3916_REG_PASSIVE_TARGET,
                       ST25R3916_REG_PASSIVE_TARGET_fdel_2 |
                           ST25R3916_REG_PASSIVE_TARGET_fdel_0 |
@@ -459,6 +817,7 @@ furi_hal_nfc_legic_prime_listener_init(const FuriHalSpiBusHandle *handle) {
                           ST25R3916_REG_PASSIVE_TARGET_d_212_424_1r);
 
   st25r3916_write_reg(handle, ST25R3916_REG_MASK_RX_TIMER, 0x02);
+#endif
 
   st25r3916_direct_cmd(handle, ST25R3916_CMD_STOP);
   uint32_t interrupts = (ST25R3916_IRQ_MASK_FWL | ST25R3916_IRQ_MASK_TXE |
@@ -472,11 +831,7 @@ furi_hal_nfc_legic_prime_listener_init(const FuriHalSpiBusHandle *handle) {
   st25r3916_get_irq(handle);
   // Enable interrupts
   st25r3916_mask_irq(handle, ~interrupts);
-  // Enable auto collision resolution
-  st25r3916_clear_reg_bits(handle, ST25R3916_REG_PASSIVE_TARGET,
-                           ST25R3916_REG_PASSIVE_TARGET_d_106_ac_a);
   st25r3916_direct_cmd(handle, ST25R3916_CMD_GOTO_SENSE);
-#endif
 
   return furi_hal_nfc_legic_prime_common_init(handle);
 }
@@ -496,11 +851,50 @@ furi_hal_nfc_legic_prime_listener_deinit(const FuriHalSpiBusHandle *handle) {
 static FuriHalNfcEvent
 furi_hal_nfc_legic_prime_listener_wait_event(uint32_t timeout_ms) {
   FuriHalNfcEvent event = furi_hal_nfc_wait_event_common(timeout_ms);
+
   const FuriHalSpiBusHandle *handle = &furi_hal_spi_bus_handle_nfc;
 
-  if (event & FuriHalNfcEventListenerActive) {
-    st25r3916_set_reg_bits(handle, ST25R3916_REG_PASSIVE_TARGET,
-                           ST25R3916_REG_PASSIVE_TARGET_d_106_ac_a);
+  FURI_LOG_T(TAG, "listener event: %x", event);
+
+  if (event & FuriHalNfcEventFieldOn) {
+    p_enter_transparent(handle);
+    do {
+      memset(legic_mem, 0, 1024 * sizeof(uint8_t));
+      legic_mem[0] = 0x81;
+      legic_mem[1] = 0x97;
+      legic_mem[2] = 0x2f;
+      legic_mem[3] = 0x91;
+      legic_mem[4] = 0xdc;
+
+      LegicPrimeTag p_card = {
+          .cardsize = 256,
+          .addrsize = 8,
+          .cmdsize = 9,
+          .tagtype = LegicPrimeTagTypeMim256,
+      };
+
+      FuriHalNfcError error = p_listener_setup_phase(&p_card);
+      if (error != FuriHalNfcErrorNone) {
+        FURI_LOG_T(TAG, "Listener setup phase failed: %d", error);
+        event = FuriHalNfcEventTimeout;
+        break;
+      }
+      uint16_t bytes_written = 0;
+      uint16_t bytes_read = 0;
+      while (true) {
+        error =
+            p_listener_connected_phase(&p_card, &bytes_read, &bytes_written);
+        if (error != FuriHalNfcErrorNone) {
+          FURI_LOG_T(TAG, "Listener connected phase failed: %d", error);
+          event = FuriHalNfcEventTimeout;
+          break;
+        }
+        // FURI_LOG_I(TAG, "bytes read/written: %d/%d", bytes_read,
+        // bytes_written);
+      }
+
+    } while (false);
+    p_exit_transparent(handle);
   }
 
   return event;
@@ -509,58 +903,35 @@ furi_hal_nfc_legic_prime_listener_wait_event(uint32_t timeout_ms) {
 FuriHalNfcError
 furi_hal_nfc_legic_prime_listener_tx(const FuriHalSpiBusHandle *handle,
                                      const uint8_t *tx_data, size_t tx_bits) {
-  FuriHalNfcError error = FuriHalNfcErrorNone;
-
-#if 1
   UNUSED(handle);
   UNUSED(tx_data);
   UNUSED(tx_bits);
-#else
-  do {
-    error = furi_hal_nfc_common_fifo_tx(handle, tx_data, tx_bits);
-    if (error != FuriHalNfcErrorNone)
-      break;
 
-    bool tx_end = furi_hal_nfc_event_wait_for_specific_irq(
-        handle, ST25R3916_IRQ_MASK_TXE, 10);
-    if (!tx_end) {
-      error = FuriHalNfcErrorCommunicationTimeout;
-      break;
-    }
-
-  } while (false);
-#endif
+  FuriHalNfcError error = FuriHalNfcErrorNone;
 
   return error;
 }
 
 FuriHalNfcError
-furi_hal_nfc_legic_prime_listener_sleep(const FuriHalSpiBusHandle *handle) {
-#if 1
+furi_hal_nfc_legic_prime_listener_rx(const FuriHalSpiBusHandle *handle,
+                                     uint8_t *rx_data, size_t rx_data_size,
+                                     size_t *rx_bits) {
   UNUSED(handle);
-#else
-  // Enable auto collision resolution
-  st25r3916_clear_reg_bits(handle, ST25R3916_REG_PASSIVE_TARGET,
-                           ST25R3916_REG_PASSIVE_TARGET_d_106_ac_a);
-  st25r3916_direct_cmd(handle, ST25R3916_CMD_STOP);
-  st25r3916_direct_cmd(handle, ST25R3916_CMD_GOTO_SLEEP);
-#endif
+  UNUSED(rx_data);
+  UNUSED(rx_data_size);
+  UNUSED(rx_bits);
+  return FuriHalNfcErrorNone;
+}
 
+FuriHalNfcError
+furi_hal_nfc_legic_prime_listener_sleep(const FuriHalSpiBusHandle *handle) {
+  UNUSED(handle);
   return FuriHalNfcErrorNone;
 }
 
 FuriHalNfcError
 furi_hal_nfc_legic_prime_listener_idle(const FuriHalSpiBusHandle *handle) {
-#if 1
   UNUSED(handle);
-#else
-  // Enable auto collision resolution
-  st25r3916_clear_reg_bits(handle, ST25R3916_REG_PASSIVE_TARGET,
-                           ST25R3916_REG_PASSIVE_TARGET_d_106_ac_a);
-  st25r3916_direct_cmd(handle, ST25R3916_CMD_STOP);
-  st25r3916_direct_cmd(handle, ST25R3916_CMD_GOTO_SENSE);
-#endif
-
   return FuriHalNfcErrorNone;
 }
 
@@ -685,7 +1056,7 @@ const FuriHalNfcTechBase furi_hal_nfc_legic_prime = {
             .deinit = furi_hal_nfc_legic_prime_listener_deinit,
             .wait_event = furi_hal_nfc_legic_prime_listener_wait_event,
             .tx = furi_hal_nfc_legic_prime_listener_tx,
-            .rx = furi_hal_nfc_common_fifo_rx,
+            .rx = furi_hal_nfc_legic_prime_listener_rx,
             .sleep = furi_hal_nfc_legic_prime_listener_sleep,
             .idle = furi_hal_nfc_legic_prime_listener_idle,
         },

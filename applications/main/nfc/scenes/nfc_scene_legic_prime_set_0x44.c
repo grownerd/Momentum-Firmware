@@ -1,6 +1,76 @@
 #include "../nfc_app_i.h"
 
+#include <datetime.h>
 #include <nfc/protocols/legic_prime/legic_prime_poller.h>
+
+/*
+    Day 0 is Aug. 22, 1990
+    Minutes is 5min ahead.
+
+    entry days addr: 0x3e, 0x3f
+    entry minutes addr: 0x40, 0x41
+    exit days addr: 0x4b, 0x4c
+    exit minutes addr: 0x4d, 0x4e
+    0x4f val: 0x32 (== dec 50, == amount paid???)
+    amount paid addr: 0x4f, 0x50?
+
+
+    How to get free parking:
+    ========================
+
+    Turns out, all you have to do is set address 0x44 to 1.
+    Also, the entry timestamp cannot be too far in the past.
+*/
+
+#define REF_YEAR 1990 // full year
+#define REF_MON 8     // months (1-12)
+#define REF_MDAY 22   // day of month (1-31)
+
+#define MINUTES_OFFSET 5 // minutes to add to the calculated timestamp
+
+#define ENTRY_D_ADDR 0x3e
+#define ENTRY_M_ADDR 0x40
+#define EXIT_D_ADDR 0x4b
+#define EXIT_M_ADDR 0x4d
+#define AMOUNT_PAID_ADDR 0x4f
+#define MYSTERY_BYTE_1 0x3c
+#define MYSTERY_BYTE_2 0x3d
+#define EXIT_FREE 0x44
+
+static DateTime tm_ref = {
+    .hour = 0,
+    .minute = 0,
+    .second = 0,
+    .year = REF_YEAR,
+    .month = REF_MON,
+    .day = REF_MDAY,
+};
+
+typedef uint32_t time_t;
+
+uint16_t get_days(void) {
+  time_t t_ref = datetime_datetime_to_timestamp(&tm_ref);
+  time_t t_now = furi_hal_rtc_get_timestamp();
+  time_t t_diff = t_now - t_ref;
+  time_t days = t_diff / 3600 / 24;
+
+  return (uint16_t)days;
+}
+
+uint16_t get_minutes(void) {
+  DateTime tm_now;
+  furi_hal_rtc_get_datetime(&tm_now);
+
+  return tm_now.hour * 60 + tm_now.minute + MINUTES_OFFSET;
+}
+
+time_t card_ts_to_time_t(uint16_t days, uint16_t mins) {
+  time_t t_ref = datetime_datetime_to_timestamp(&tm_ref);
+  time_t days_in_secs = days * 3600 * 24;
+  time_t mins_in_secs = mins * 60;
+
+  return t_ref + days_in_secs + mins_in_secs;
+}
 
 NfcCommand nfc_scene_legic_prime_set_0x44_worker_callback(NfcGenericEvent event,
                                                           void *context) {

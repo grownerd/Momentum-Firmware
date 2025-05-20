@@ -4,10 +4,16 @@
 
 #define BITS_IN_BYTE (8)
 
-#define LEGIC_PRIME_SIGNAL_BIT_MAX_EDGES (2)
-#define LEGIC_PRIME_SIGNAL_MAX_BITS (24)
+/*
+ * 21 periods per 100us card bit == 42 transitions
+ * 4.76us/period
+ */
+
+#define LEGIC_PRIME_SIGNAL_BIT_MAX_EDGES (42)
+#define LEGIC_PRIME_SIGNAL_MAX_BITS (32)
 #define LEGIC_PRIME_SIGNAL_MAX_EDGES                                           \
-  (LEGIC_PRIME_SIGNAL_BIT_MAX_EDGES * LEGIC_PRIME_SIGNAL_MAX_BITS)
+  (LEGIC_PRIME_SIGNAL_BIT_MAX_EDGES * LEGIC_PRIME_SIGNAL_MAX_BITS +            \
+   2) // 2 ewdges in listener eof
 
 #define LEGIC_PRIME_SIGNAL_SEQUENCE_SIZE (LEGIC_PRIME_SIGNAL_MAX_BITS)
 
@@ -26,13 +32,17 @@
 #define LEGIC_PRIME_SIGNAL_T_POLLER_BIT_ONE DIGITAL_SIGNAL_US(85)
 #define LEGIC_PRIME_SIGNAL_T_POLLER_BIT_ZERO DIGITAL_SIGNAL_US(45)
 #define LEGIC_PRIME_SIGNAL_T_POLLER_EOF DIGITAL_SIGNAL_US(325)
-#define LEGIC_PRIME_SIGNAL_T_LISTENER_BIT DIGITAL_SIGNAL_US(100)
+#define LEGIC_PRIME_SIGNAL_T_LISTENER_BIT DIGITAL_SIGNAL_US(99)
+#define LEGIC_PRIME_SIGNAL_T_LISTENER_EOF DIGITAL_SIGNAL_NS(50)
 
 typedef enum {
   LegicPrime_SignalIndexZero,
   LegicPrime_SignalIndexOne,
   LegicPrime_SignalIndexEof,
   LegicPrime_SignalIndexCharge,
+  LegicPrime_SignalIndexListenerOne,
+  LegicPrime_SignalIndexListenerZero,
+  LegicPrime_SignalIndexListenerEof,
   LegicPrime_SignalIndexCount,
 } LegicPrime_SignalIndex;
 
@@ -53,8 +63,8 @@ static void legic_prime_signal_add_byte(LegicPrime_Signal* instance, uint8_t byt
 }
 #endif
 
-static void legic_prime_signal_encode(LegicPrime_Signal *instance,
-                                      uint32_t tx_data, size_t tx_bits) {
+static void legic_prime_poller_signal_encode(LegicPrime_Signal *instance,
+                                             uint32_t tx_data, size_t tx_bits) {
   furi_assert(instance);
   furi_assert(tx_data);
 
@@ -69,6 +79,22 @@ static void legic_prime_signal_encode(LegicPrime_Signal *instance,
   }
   // End of frame
   digital_sequence_add_signal(instance->tx_sequence, LegicPrime_SignalIndexEof);
+}
+
+static void legic_prime_listener_signal_encode(LegicPrime_Signal *instance,
+                                               uint32_t tx_data,
+                                               size_t tx_bits) {
+  furi_assert(instance);
+  furi_assert(tx_data);
+
+  for (size_t i = 0; i < tx_bits; i++) {
+    digital_sequence_add_signal(instance->tx_sequence,
+                                FURI_BIT(tx_data, i)
+                                    ? LegicPrime_SignalIndexListenerOne
+                                    : LegicPrime_SignalIndexListenerZero);
+  }
+  digital_sequence_add_signal(instance->tx_sequence,
+                              LegicPrime_SignalIndexListenerEof);
 }
 
 static inline void legic_prime_signal_generate_signal(DigitalSignal *signal,
@@ -94,6 +120,30 @@ static inline void legic_prime_signal_generate_signal(DigitalSignal *signal,
   case LegicPrime_SignalIndexCharge:
     digital_signal_add_period_with_level(signal,
                                          LEGIC_PRIME_SIGNAL_T_POLLER_CHARGE, 0);
+    break;
+
+  case LegicPrime_SignalIndexListenerOne:
+    for (int i = 0; i < LEGIC_PRIME_SIGNAL_BIT_MAX_EDGES / 2; i++) {
+
+      digital_signal_add_period_with_level(signal,
+                                           LEGIC_PRIME_SIGNAL_T_LISTENER_BIT /
+                                               LEGIC_PRIME_SIGNAL_BIT_MAX_EDGES,
+                                           1);
+      digital_signal_add_period_with_level(signal,
+                                           LEGIC_PRIME_SIGNAL_T_LISTENER_BIT /
+                                               LEGIC_PRIME_SIGNAL_BIT_MAX_EDGES,
+                                           0);
+    }
+    break;
+
+  case LegicPrime_SignalIndexListenerZero:
+    digital_signal_add_period_with_level(signal,
+                                         LEGIC_PRIME_SIGNAL_T_LISTENER_BIT, 0);
+    break;
+
+  case LegicPrime_SignalIndexListenerEof:
+    digital_signal_add_period_with_level(signal,
+                                         LEGIC_PRIME_SIGNAL_T_LISTENER_EOF, 0);
     break;
 
   default:
@@ -144,13 +194,16 @@ void legic_prime_signal_free(LegicPrime_Signal *instance) {
 }
 
 void legic_prime_signal_tx(LegicPrime_Signal *instance, uint32_t tx_data,
-                           size_t tx_bits) {
+                           size_t tx_bits, bool poller) {
   furi_assert(instance);
   furi_assert(tx_data);
 
   FURI_CRITICAL_ENTER();
   digital_sequence_clear(instance->tx_sequence);
-  legic_prime_signal_encode(instance, tx_data, tx_bits);
+  if (poller)
+    legic_prime_poller_signal_encode(instance, tx_data, tx_bits);
+  else
+    legic_prime_listener_signal_encode(instance, tx_data, tx_bits);
   digital_sequence_transmit(instance->tx_sequence);
   FURI_CRITICAL_EXIT();
 }

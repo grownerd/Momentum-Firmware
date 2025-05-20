@@ -1,14 +1,15 @@
 #include "nfc_listener_defs.h"
 
+#include <nfc/protocols/felica/felica_listener_defs.h>
 #include <nfc/protocols/iso14443_3a/iso14443_3a_listener_defs.h>
 #include <nfc/protocols/iso14443_4a/iso14443_4a_listener_defs.h>
 #include <nfc/protocols/iso15693_3/iso15693_3_listener_defs.h>
-#include <nfc/protocols/mf_ultralight/mf_ultralight_listener_defs.h>
+#include <nfc/protocols/legic_prime/legic_prime_listener_defs.h>
 #include <nfc/protocols/mf_classic/mf_classic_listener_defs.h>
+#include <nfc/protocols/mf_ultralight/mf_ultralight_listener_defs.h>
 #include <nfc/protocols/slix/slix_listener_defs.h>
-#include <nfc/protocols/felica/felica_listener_defs.h>
 
-const NfcListenerBase* const nfc_listeners_api[NfcProtocolNum] = {
+const NfcListenerBase *const nfc_listeners_api[NfcProtocolNum] = {
     [NfcProtocolIso14443_3a] = &nfc_listener_iso14443_3a,
     [NfcProtocolIso14443_3b] = NULL,
     [NfcProtocolIso14443_4a] = &nfc_listener_iso14443_4a,
@@ -21,5 +22,5 @@ const NfcListenerBase* const nfc_listeners_api[NfcProtocolNum] = {
     [NfcProtocolSt25tb] = NULL,
     [NfcProtocolFelica] = &nfc_listener_felica,
     [NfcProtocolEmv] = NULL,
-    [NfcProtocolLegicPrime] = NULL,
+    [NfcProtocolLegicPrime] = &nfc_listener_legic_prime,
 };

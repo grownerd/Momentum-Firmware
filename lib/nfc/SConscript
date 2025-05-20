@@ -55,7 +55,6 @@ env.Append(
         File("protocols/mf_classic/mf_classic_poller_sync.h"),
         File("protocols/st25tb/st25tb_poller_sync.h"),
         File("protocols/felica/felica_poller_sync.h"),
-        File("protocols/legic_prime/legic_prime_poller_sync.h"),
         # Misc
         File("helpers/nfc_util.h"),
         File("helpers/iso14443_crc.h"),

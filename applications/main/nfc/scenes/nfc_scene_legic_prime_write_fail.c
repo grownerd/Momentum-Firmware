@@ -1,4 +1,5 @@
 #include "../nfc_app_i.h"
+#include "scenes/nfc_scene.h"
 
 void nfc_scene_legic_prime_write_fail_widget_callback(GuiButtonType result,
                                                       InputType type,
@@ -38,11 +39,11 @@ bool nfc_scene_legic_prime_write_fail_on_event(void *context,
   if (event.type == SceneManagerEventTypeCustom) {
     if (event.event == GuiButtonTypeLeft) {
       consumed = scene_manager_search_and_switch_to_previous_scene(
-          instance->scene_manager, NfcSceneSavedMenu);
+          instance->scene_manager, NfcSceneReadMenu);
     }
   } else if (event.type == SceneManagerEventTypeBack) {
     consumed = scene_manager_search_and_switch_to_previous_scene(
-        instance->scene_manager, NfcSceneSavedMenu);
+        instance->scene_manager, NfcSceneReadMenu);
   }
   return consumed;
 }
