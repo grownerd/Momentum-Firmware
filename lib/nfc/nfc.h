@@ -401,6 +401,8 @@ NfcError nfc_iso15693_listener_tx_sof(Nfc* instance);
  * @returns NfcErrorNone on success, any other error code on failure.
  */
 NfcError nfc_legic_prime_poller_trx(Nfc* instance, uint8_t* trx_data);
+NfcError nfc_legic_prime_listener_rx(Nfc* instance, uint8_t* trx_data);
+NfcError nfc_legic_prime_listener_tx(Nfc* instance, uint8_t* trx_data);
 
 #ifdef __cplusplus
 }

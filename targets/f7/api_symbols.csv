@@ -2959,6 +2959,8 @@ Function,+,nfc_iso14443a_poller_trx_custom_parity,NfcError,"Nfc*, const BitBuffe
 Function,+,nfc_iso14443a_poller_trx_sdd_frame,NfcError,"Nfc*, const BitBuffer*, BitBuffer*, uint32_t"
 Function,+,nfc_iso14443a_poller_trx_short_frame,NfcError,"Nfc*, NfcIso14443aShortFrame, BitBuffer*, uint32_t"
 Function,+,nfc_iso15693_listener_tx_sof,NfcError,Nfc*
+Function,+,nfc_legic_prime_listener_rx,NfcError,"Nfc*, uint8_t*"
+Function,+,nfc_legic_prime_listener_tx,NfcError,"Nfc*, uint8_t*"
 Function,+,nfc_legic_prime_poller_trx,NfcError,"Nfc*, uint8_t*"
 Function,+,nfc_listener_alloc,NfcListener*,"Nfc*, NfcProtocol, const NfcDeviceData*"
 Function,+,nfc_listener_free,void,NfcListener*

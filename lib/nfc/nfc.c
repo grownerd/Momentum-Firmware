@@ -675,15 +675,6 @@ NfcError nfc_legic_prime_poller_trx(Nfc *instance, uint8_t *trx_data) {
   FuriHalNfcError error = FuriHalNfcErrorNone;
 
   do {
-#if 0
-        // We're not using the tx block timer, so this could be removed.
-        furi_hal_nfc_trx_reset();
-        while(furi_hal_nfc_timer_block_tx_is_running()) {
-            FuriHalNfcEvent event =
-                furi_hal_nfc_poller_wait_event(FURI_HAL_NFC_EVENT_WAIT_FOREVER);
-            if(event & FuriHalNfcEventTimerBlockTxExpired) break;
-        }
-#endif
     error = furi_hal_nfc_poller_tx(trx_data, 0);
     if (error != FuriHalNfcErrorNone) {
       FURI_LOG_D(TAG, "Failed in poller TX");
@@ -700,6 +691,44 @@ NfcError nfc_legic_prime_poller_trx(Nfc *instance, uint8_t *trx_data) {
       break;
     }
 
+  } while (false);
+
+  return ret;
+}
+
+NfcError nfc_legic_prime_listener_tx(Nfc *instance, uint8_t *trx_data) {
+  furi_check(instance);
+  furi_check(trx_data);
+
+  NfcError ret = NfcErrorNone;
+  FuriHalNfcError error = FuriHalNfcErrorNone;
+
+  do {
+    error = furi_hal_nfc_listener_tx(trx_data, 0);
+    if (error != FuriHalNfcErrorNone) {
+      FURI_LOG_D(TAG, "Failed in listener TX");
+      ret = nfc_process_hal_error(error);
+      break;
+    }
+  } while (false);
+
+  return ret;
+}
+
+NfcError nfc_legic_prime_listener_rx(Nfc *instance, uint8_t *trx_data) {
+  furi_check(instance);
+  furi_check(trx_data);
+
+  NfcError ret = NfcErrorNone;
+  FuriHalNfcError error = FuriHalNfcErrorNone;
+
+  do {
+    error = furi_hal_nfc_listener_rx(trx_data, 0, &instance->rx_bits);
+    if (error != FuriHalNfcErrorNone) {
+      FURI_LOG_D(TAG, "Failed in listener TX");
+      ret = nfc_process_hal_error(error);
+      break;
+    }
   } while (false);
 
   return ret;

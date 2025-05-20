@@ -64,6 +64,12 @@ typedef struct {
     uint16_t total_errors;
 } LegicPrimePollerTrxData;
 
+typedef struct {
+    LegicPrimeData data;
+    uint16_t addrs_read;
+    uint16_t addrs_written;
+} LegicPrimeListenerTrxData;
+
 extern const NfcDeviceBase nfc_device_legic_prime;
 
 LegicPrimeData* legic_prime_alloc(void);

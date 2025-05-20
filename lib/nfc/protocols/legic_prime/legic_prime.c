@@ -69,21 +69,27 @@ bool legic_prime_load(LegicPrimeData *data, FlipperFormat *ff,
       break;
 
     parsed = true;
-    uint32_t blocks_total = 0;
-    uint32_t blocks_read = 0;
-    if (!flipper_format_read_uint32(ff, "Bytes total", &blocks_total, 1))
+    if (!flipper_format_read_uint32(ff, "Tagtype",
+                                    (uint32_t *)data->tag.tagtype, 1))
       break;
-    if (!flipper_format_read_uint32(ff, "Bytes read", &blocks_read, 1))
+
+    if (!flipper_format_read_uint32(ff, "Cmdsize",
+                                    (uint32_t *)&data->tag.cmdsize, 1))
       break;
-    // TODO: use cardsize!
-    data->blocks_total = (uint16_t)blocks_total;
-    data->blocks_read = (uint16_t)blocks_read;
+
+    if (!flipper_format_read_uint32(ff, "Addrsize",
+                                    (uint32_t *)&data->tag.addrsize, 1))
+      break;
+
+    if (!flipper_format_read_uint32(ff, "Cardsize",
+                                    (uint32_t *)&data->tag.cardsize, 1))
+      break;
 
     FuriString *temp_str = furi_string_alloc();
     furi_string_printf(temp_str, "Data");
     if (!flipper_format_read_hex(ff, furi_string_get_cstr(temp_str),
                                  (&data->data[0]),
-                                 blocks_total * sizeof(uint8_t))) {
+                                 data->tag.cardsize * sizeof(uint8_t))) {
       parsed = false;
       break;
     }
@@ -105,11 +111,20 @@ bool legic_prime_save(const LegicPrimeData *data, FlipperFormat *ff) {
                                      &legic_prime_data_format_version, 1))
       break;
 
-    uint32_t blocks_total = data->blocks_total;
-    uint32_t blocks_read = data->blocks_read;
-    if (!flipper_format_write_uint32(ff, "Bytes total", &blocks_total, 1))
+    if (!flipper_format_write_uint32(ff, "Tagtype",
+                                     (uint32_t *)&data->tag.tagtype, 1))
       break;
-    if (!flipper_format_write_uint32(ff, "Bytes read", &blocks_read, 1))
+
+    if (!flipper_format_write_uint32(ff, "Cmdsize",
+                                     (uint32_t *)&data->tag.cmdsize, 1))
+      break;
+
+    if (!flipper_format_write_uint32(ff, "Addrsize",
+                                     (uint32_t *)&data->tag.addrsize, 1))
+      break;
+
+    if (!flipper_format_write_uint32(ff, "Cardsize",
+                                     (uint32_t *)&data->tag.cardsize, 1))
       break;
 
     saved = true;
@@ -117,7 +132,7 @@ bool legic_prime_save(const LegicPrimeData *data, FlipperFormat *ff) {
     furi_string_printf(temp_str, "Data");
     if (!flipper_format_write_hex(ff, furi_string_get_cstr(temp_str),
                                   (&data->data[0]),
-                                  blocks_total * sizeof(uint8_t))) {
+                                  data->tag.cardsize * sizeof(uint8_t))) {
       saved = false;
       break;
     }
