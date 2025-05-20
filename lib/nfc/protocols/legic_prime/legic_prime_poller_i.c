@@ -96,7 +96,7 @@ LegicPrimeError legic_prime_poller_activate(LegicPrimePoller *instance,
       instance->legic_prime_event.type = LegicPrimePollerEventTypeFail;
       break;
     }
-    data->blocks_total = data->tag.cardsize;
+    // data->blocks_total = data->tag.cardsize;
     instance->legic_prime_event.type = LegicPrimePollerEventTypeRequestMode;
 
   } while (false);

@@ -116,7 +116,7 @@ legic_prime_poller_state_handler_read_blocks(LegicPrimePoller *instance) {
   LegicPrimePollerTrxData *trx_data = malloc(sizeof(LegicPrimePollerTrxData));
 
   size_t tag_sz = instance->data->tag.cardsize;
-  instance->data->blocks_read = 0;
+  // instance->data->blocks_read = 0;
 
   memcpy(&trx_data->tag, &instance->data->tag, sizeof(LegicPrimeTag));
   trx_data->cmd = LegicPrimeCmdRead;
@@ -132,7 +132,7 @@ legic_prime_poller_state_handler_read_blocks(LegicPrimePoller *instance) {
     uint8_t *data_ptr = instance->data->data;
     uint8_t *response_data_ptr = trx_data->response_data;
 
-    instance->data->blocks_read = trx_data->tag.cardsize;
+    // instance->data->blocks_read = trx_data->tag.cardsize;
     memcpy(data_ptr, response_data_ptr, LEGIC_PRIME_DATA_BLOCK_SIZE);
 
     FURI_LOG_I(TAG, "Read %d bytes with %d retries", trx_data->bytes_processed,

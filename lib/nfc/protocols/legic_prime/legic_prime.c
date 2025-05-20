@@ -64,26 +64,31 @@ bool legic_prime_load(LegicPrimeData *data, FlipperFormat *ff,
 
   bool parsed = false;
 
+  uint32_t tagtype = 0;
+  uint32_t cmdsize = 0;
+  uint32_t addrsize = 0;
+  uint32_t cardsize = 0;
+
   do {
     if (version < NFC_UNIFIED_FORMAT_VERSION)
       break;
 
     parsed = true;
-    if (!flipper_format_read_uint32(ff, "Tagtype",
-                                    (uint32_t *)data->tag.tagtype, 1))
+    if (!flipper_format_read_uint32(ff, "Tagtype", &tagtype, 1))
       break;
+    data->tag.tagtype = (LegicPrimeTagType)tagtype;
 
-    if (!flipper_format_read_uint32(ff, "Cmdsize",
-                                    (uint32_t *)&data->tag.cmdsize, 1))
+    if (!flipper_format_read_uint32(ff, "Cmdsize", &cmdsize, 1))
       break;
+    data->tag.cmdsize = (uint8_t)cmdsize;
 
-    if (!flipper_format_read_uint32(ff, "Addrsize",
-                                    (uint32_t *)&data->tag.addrsize, 1))
+    if (!flipper_format_read_uint32(ff, "Addrsize", &addrsize, 1))
       break;
+    data->tag.addrsize = (uint8_t)addrsize;
 
-    if (!flipper_format_read_uint32(ff, "Cardsize",
-                                    (uint32_t *)&data->tag.cardsize, 1))
+    if (!flipper_format_read_uint32(ff, "Cardsize", &cardsize, 1))
       break;
+    data->tag.cardsize = (uint16_t)cardsize;
 
     FuriString *temp_str = furi_string_alloc();
     furi_string_printf(temp_str, "Data");
@@ -103,6 +108,11 @@ bool legic_prime_save(const LegicPrimeData *data, FlipperFormat *ff) {
 
   bool saved = false;
 
+  uint32_t tagtype = data->tag.tagtype;
+  uint32_t cmdsize = data->tag.cmdsize;
+  uint32_t addrsize = data->tag.addrsize;
+  uint32_t cardsize = data->tag.cardsize;
+
   do {
     if (!flipper_format_write_comment_cstr(ff, LEGIC_PRIME_PROTOCOL_NAME
                                            " specific data"))
@@ -111,20 +121,16 @@ bool legic_prime_save(const LegicPrimeData *data, FlipperFormat *ff) {
                                      &legic_prime_data_format_version, 1))
       break;
 
-    if (!flipper_format_write_uint32(ff, "Tagtype",
-                                     (uint32_t *)&data->tag.tagtype, 1))
+    if (!flipper_format_write_uint32(ff, "Tagtype", &tagtype, 1))
       break;
 
-    if (!flipper_format_write_uint32(ff, "Cmdsize",
-                                     (uint32_t *)&data->tag.cmdsize, 1))
+    if (!flipper_format_write_uint32(ff, "Cmdsize", &cmdsize, 1))
       break;
 
-    if (!flipper_format_write_uint32(ff, "Addrsize",
-                                     (uint32_t *)&data->tag.addrsize, 1))
+    if (!flipper_format_write_uint32(ff, "Addrsize", &addrsize, 1))
       break;
 
-    if (!flipper_format_write_uint32(ff, "Cardsize",
-                                     (uint32_t *)&data->tag.cardsize, 1))
+    if (!flipper_format_write_uint32(ff, "Cardsize", &cardsize, 1))
       break;
 
     saved = true;

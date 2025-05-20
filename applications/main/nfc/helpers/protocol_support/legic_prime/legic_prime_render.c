@@ -11,7 +11,7 @@ void nfc_render_legic_prime_format_bytes(FuriString *str, const uint8_t *data,
 
 void nfc_render_legic_prime_tech_type(const LegicPrimeData *data,
                                       FuriString *str) {
-  furi_string_cat_printf(str, "Tech: LegicPrime MIM %d\n", data->blocks_read);
+  furi_string_cat_printf(str, "Tech: LegicPrime MIM %d\n", data->tag.cardsize);
 }
 
 void nfc_render_legic_prime_brief(const LegicPrimeData *data, FuriString *str) {
@@ -40,15 +40,15 @@ static void legic_prime_render_raw_data(const uint8_t *data, size_t size,
 }
 
 void nfc_render_legic_prime_dump(const LegicPrimeData *data, FuriString *str) {
-  furi_assert((data->blocks_total % 8) == 0);
+  furi_assert((data->tag.cardsize % 8) == 0);
 
-  uint8_t clear_data[data->blocks_total];
+  uint8_t clear_data[data->tag.cardsize];
 
-  for (size_t i = 0; i < data->blocks_total; i++) {
+  for (size_t i = 0; i < data->tag.cardsize; i++) {
     clear_data[i] = i < 22 ? data->data[i] : data->data[i] ^ data->data[4];
   }
 
-  for (size_t i = 0; i < data->blocks_total; i += 8) {
+  for (size_t i = 0; i < data->tag.cardsize; i += 8) {
     legic_prime_render_raw_data(clear_data + i, 8, str);
   }
 }

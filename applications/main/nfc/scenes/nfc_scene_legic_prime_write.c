@@ -17,9 +17,9 @@ NfcCommand nfc_scene_legic_prime_write_worker_callback(NfcGenericEvent event,
         nfc_device_get_data(instance->nfc_device, NfcProtocolLegicPrime);
     legic_prime_event->write_data = write_data;
 
-    uint8_t write_mask[write_data->blocks_total];
-    memset(write_mask, 0xff, write_data->blocks_total);
-    memcpy(legic_prime_event->write_mask, write_mask, write_data->blocks_total);
+    uint8_t write_mask[write_data->tag.cardsize];
+    memset(write_mask, 0xff, write_data->tag.cardsize);
+    memcpy(legic_prime_event->write_mask, write_mask, write_data->tag.cardsize);
 
     legic_prime_event->data->poller_mode.mode = LegicPrimePollerModeWrite;
   } else if (legic_prime_event->type == LegicPrimePollerEventTypeSuccess) {
