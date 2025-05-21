@@ -12,13 +12,10 @@
 
 #define TAG "FuriHalLegicPrime"
 
-// Prevent FDT timer from starting
-#define FURI_HAL_NFC_LEGIC_PRIME_LISTENER_FDT_COMP_FC (INT32_MAX)
-
-#define MAX_RX_ERRORS (100)
 #define BITS_IN_BYTE (8)
-#define MAX_ANSWER_BITS (12)
-#define BIT_DEBUG_BUFFER_SIZE (64)
+#define POLLER_MAX_RX_ERRORS (100)
+#define POLLER_MAX_ANSWER_BITS (12)
+#define POLLER_BIT_DEBUG_BUFFER_SIZE (64)
 #define POLLER_SETUP_IV_VAL (0x55)
 
 /*
@@ -59,33 +56,33 @@ static volatile int32_t LISTENER_BIT_TOL_T = (4);
 static volatile int32_t LISTENER_TIMEOUT_T =
     (41); // shorten this no more than  one_t + pause_t
 static volatile int32_t LISTENER_RX_FRAME_TIMEOUT_T = (4000);
-static volatile bool bit_debugging_enabled = false;
-static volatile uint32_t debug_bit_idx = 0;
 
-static volatile int32_t rng_steps_rx = (3);
-static volatile int32_t rng_steps_tx = (2);
-static volatile int32_t rng_steps_setup_back = (1);
-static volatile int32_t rng_steps_write_ack = (35);
+static volatile int32_t LISTENER_RNG_STEPS_RX = (3);
+static volatile int32_t LISTENER_RNG_STEPS_TX = (2);
+static volatile int32_t LISTENER_RNG_STEPS_SETUP_BACK = (1);
+static volatile int32_t LISTENER_RNG_STEPS_WRITE_ACK = (35);
 
-static volatile bool bypass_crc_check = 0;
+// Poller data structures and vars
+uint16_t *poller_rx_buf = NULL;
+static uint16_t *poller_ones_per_slot = NULL;
+static uint16_t poller_ones_before_start = 0;
+static uint8_t poller_tag_type = 0;
+static volatile bool poller_bypass_crc_check = 0;
 
-LegicPrimeData *sim_tag = NULL;
-uint16_t *rx_buf = NULL;
-static LegicPrime_Signal *legic_prime_signal = NULL;
+// Listener data structure and vars (mostly for debugging)
+LegicPrimeData *listener_sim_tag = NULL;
+static volatile bool listener_bit_debugging_enabled = false;
+static volatile uint32_t listener_debug_bit_idx = 0;
 
-static uint16_t *ones_per_slot = NULL;
-static uint16_t ones_before_start = 0;
-static volatile int16_t irq_bits = 0;
-
-static crc_t legic_crc;
-static uint32_t cmd = 0;
-static uint8_t tag_type = 0;
 static bool transparent_mode = 0;
+static crc_t legic_crc;
+static LegicPrime_Signal *legic_prime_signal = NULL;
 
 /*
  * This is the most important part of this whole thing!
  * DO NOT add any code to this isr, OR things WILL break!
  */
+static volatile int16_t irq_bits = 0;
 static void p_rx_cb(void *ctx) {
   UNUSED(ctx);
   irq_bits++;
@@ -93,7 +90,7 @@ static void p_rx_cb(void *ctx) {
 
 // private functions
 
-static int is_within_tolerance(int val, int ref, int tol) {
+static bool is_within_tolerance(uint32_t val, uint32_t ref, uint32_t tol) {
   return ((val >= (ref - tol)) && (val <= (ref + tol)));
 }
 
@@ -103,7 +100,7 @@ static uint8_t calc_crc4(uint16_t cmd, uint8_t cmd_sz, uint8_t value) {
   return crc_finish(&legic_crc);
 }
 
-static bool p_poller_crc_good(uint16_t data, size_t cmd_sz) {
+static bool p_poller_crc_good(uint16_t data, uint16_t cmd, size_t cmd_sz) {
 
   // split frame into data and crc
   uint8_t byte = data & 0xff;
@@ -165,23 +162,23 @@ uint16_t p_poller_decode_bits(size_t rx_bits) {
   uint8_t bit_idx = 0;
   uint16_t remaining_bits = 0;
 
-  for (int i = 0; i < MAX_ANSWER_BITS; i++) {
+  for (int i = 0; i < POLLER_MAX_ANSWER_BITS; i++) {
     if (remaining_bits) {
-      if (is_within_tolerance((remaining_bits + ones_per_slot[i]),
+      if (is_within_tolerance((remaining_bits + poller_ones_per_slot[i]),
                               POLLER_BIT_IRQ_COUNT, POLLER_BIT_IRQ_COUNT_TOL)) {
         bits |= 1 << bit_idx++;
         FURI_LOG_T(TAG, "adding ONE in slot %d, bits: %d remaining bits: %d", i,
-                   ones_per_slot[i], remaining_bits);
+                   poller_ones_per_slot[i], remaining_bits);
       } else {
         bits |= 0 << bit_idx++;
         FURI_LOG_T(TAG, "unused bits! slot %d, bits: %d", i, remaining_bits);
       }
 
       remaining_bits = 0;
-    } else if (ones_per_slot[i] >=
+    } else if (poller_ones_per_slot[i] >=
                (POLLER_BIT_IRQ_COUNT - POLLER_BIT_IRQ_COUNT_TOL)) {
-      uint16_t condensed_bits = ones_per_slot[i] / POLLER_BIT_IRQ_COUNT;
-      remaining_bits = ones_per_slot[i] % POLLER_BIT_IRQ_COUNT;
+      uint16_t condensed_bits = poller_ones_per_slot[i] / POLLER_BIT_IRQ_COUNT;
+      remaining_bits = poller_ones_per_slot[i] % POLLER_BIT_IRQ_COUNT;
       if (is_within_tolerance(remaining_bits, POLLER_BIT_IRQ_COUNT,
                               POLLER_BIT_IRQ_COUNT_TOL)) {
         remaining_bits = 0;
@@ -189,18 +186,19 @@ uint16_t p_poller_decode_bits(size_t rx_bits) {
       }
 
       for (int j = 1; j <= condensed_bits; j++) {
-        if (is_within_tolerance(ones_per_slot[i], POLLER_BIT_IRQ_COUNT * j,
+        if (is_within_tolerance(poller_ones_per_slot[i],
+                                POLLER_BIT_IRQ_COUNT * j,
                                 POLLER_BIT_IRQ_COUNT_TOL)) {
         }
         bits |= 1 << bit_idx++;
         FURI_LOG_T(TAG, "adding ONE in slot %d, bits: %d remaining bits: %d", i,
-                   ones_per_slot[i], remaining_bits);
+                   poller_ones_per_slot[i], remaining_bits);
       }
     } else {
-      remaining_bits = ones_per_slot[i] % POLLER_BIT_IRQ_COUNT;
+      remaining_bits = poller_ones_per_slot[i] % POLLER_BIT_IRQ_COUNT;
       bits |= 0 << bit_idx++;
       FURI_LOG_T(TAG, "adding NULL in slot %d, bits: %d remaining bits: %d", i,
-                 ones_per_slot[i], remaining_bits);
+                 poller_ones_per_slot[i], remaining_bits);
     }
   }
 
@@ -276,14 +274,14 @@ uint16_t p_poller_rx(size_t rx_bits) {
   uint8_t bit_idx = 0;
   furi_delay_us(rx_bit_start_delay);
 
-  memset(ones_per_slot, 0, sizeof(uint16_t) * MAX_ANSWER_BITS);
-  ones_before_start = irq_bits;
+  memset(poller_ones_per_slot, 0, sizeof(uint16_t) * POLLER_MAX_ANSWER_BITS);
+  poller_ones_before_start = irq_bits;
   irq_bits = 0;
   while (bits_expected--) {
     furi_delay_us(POLLER_RX_LOOP_T);
 
     FURI_CRITICAL_ENTER();
-    ones_per_slot[bit_idx] = irq_bits;
+    poller_ones_per_slot[bit_idx] = irq_bits;
     bit_idx++;
     irq_bits = 0;
     FURI_CRITICAL_EXIT();
@@ -302,9 +300,9 @@ uint16_t p_poller_rx(size_t rx_bits) {
   /*
    * With trace logging enabled, only the first setup answer can be observed.
    */
-  FURI_LOG_T(TAG, "bits before start: %d", ones_before_start);
-  for (int i = 0; i < MAX_ANSWER_BITS; i++) {
-    FURI_LOG_T(TAG, "bits in slot %02d: %4d", i, ones_per_slot[i]);
+  FURI_LOG_T(TAG, "bits before start: %d", poller_ones_before_start);
+  for (int i = 0; i < POLLER_MAX_ANSWER_BITS; i++) {
+    FURI_LOG_T(TAG, "bits in slot %02d: %4d", i, poller_ones_per_slot[i]);
   }
 
   return p_poller_decode_bits(rx_bits);
@@ -357,18 +355,21 @@ static uint8_t p_poller_setup(uint32_t timeout) {
 }
 
 static bool p_read_byte(uint16_t addr, size_t cmd_sz) {
+  uint16_t cmd = 0;
 
   legic_prng_forward(2);
   cmd = (addr << 1) | LegicPrimeCmdRead;
   p_poller_tx(cmd, cmd_sz);
   legic_prng_forward(2);
-  rx_buf[addr] = p_poller_rx(MAX_ANSWER_BITS);
+  poller_rx_buf[addr] = p_poller_rx(POLLER_MAX_ANSWER_BITS);
   legic_prng_forward(1);
 
-  return (p_poller_crc_good(rx_buf[addr], cmd_sz) || bypass_crc_check);
+  return (p_poller_crc_good(poller_rx_buf[addr], cmd, cmd_sz) ||
+          poller_bypass_crc_check);
 }
 
 static bool p_write_byte(uint16_t addr, uint8_t data, size_t addr_sz) {
+  uint16_t cmd = 0;
 
   uint16_t cmd_sz = addr_sz + 1 + 8 + 4; // cmd_sz = addr_sz + cmd + data + crc
 
@@ -381,10 +382,10 @@ static bool p_write_byte(uint16_t addr, uint8_t data, size_t addr_sz) {
   legic_prng_forward(2);
   p_poller_tx(cmd, cmd_sz);
   legic_prng_forward(2);
-  rx_buf[addr] = p_poller_rx(1);
+  poller_rx_buf[addr] = p_poller_rx(1);
   legic_prng_forward(35);
 
-  return rx_buf[addr];
+  return poller_rx_buf[addr];
 }
 
 /*
@@ -410,13 +411,13 @@ static int32_t p_listener_rx(uint8_t *len, int32_t *raw) {
   // consider locking the kernel earlier and ditching the priority stuff
   furi_kernel_lock();
 
-  int bit_errors[BIT_DEBUG_BUFFER_SIZE];
-  int bit_debug[BIT_DEBUG_BUFFER_SIZE];
+  int bit_errors[POLLER_BIT_DEBUG_BUFFER_SIZE];
+  int bit_debug[POLLER_BIT_DEBUG_BUFFER_SIZE];
   int bit_err_idx = 0;
   int bit_dbg_idx = 0;
-  if (bit_debugging_enabled) {
-    memset(bit_errors, 0, sizeof(int) * BIT_DEBUG_BUFFER_SIZE);
-    memset(bit_debug, 0, sizeof(int) * BIT_DEBUG_BUFFER_SIZE);
+  if (listener_bit_debugging_enabled) {
+    memset(bit_errors, 0, sizeof(int) * POLLER_BIT_DEBUG_BUFFER_SIZE);
+    memset(bit_debug, 0, sizeof(int) * POLLER_BIT_DEBUG_BUFFER_SIZE);
   }
   uint32_t loop_timeout = LISTENER_RX_FRAME_TIMEOUT_T;
   uint16_t loop_idx = 0;
@@ -463,8 +464,8 @@ static int32_t p_listener_rx(uint8_t *len, int32_t *raw) {
       break;
     }
 
-    if (bit_err_idx >= BIT_DEBUG_BUFFER_SIZE ||
-        bit_dbg_idx >= BIT_DEBUG_BUFFER_SIZE)
+    if (bit_err_idx >= POLLER_BIT_DEBUG_BUFFER_SIZE ||
+        bit_dbg_idx >= POLLER_BIT_DEBUG_BUFFER_SIZE)
       break;
 
     // Break if no more bits are received!
@@ -488,16 +489,16 @@ static int32_t p_listener_rx(uint8_t *len, int32_t *raw) {
   if (bit_err_idx) {
     FURI_LOG_T(TAG, "raw_frame: 0x%08lX bit errors: %d", raw_frame,
                bit_err_idx);
-    for (int i = 0; i < BIT_DEBUG_BUFFER_SIZE; i++) {
+    for (int i = 0; i < POLLER_BIT_DEBUG_BUFFER_SIZE; i++) {
       FURI_LOG_T(TAG, "bit error: idx: %d, diff: %d", i, bit_errors[i]);
     }
   }
-  if (bit_debugging_enabled && bit_idx == debug_bit_idx) {
+  if (listener_bit_debugging_enabled && bit_idx == listener_debug_bit_idx) {
     FURI_LOG_D(TAG,
                "raw_frame: 0x%08lX, xored_frame: 0%08lX, "
                "len: %d rng steps: %ld",
                raw_frame, xored_frame, bit_idx, legic_prng_get_count());
-    for (int i = 0; i < BIT_DEBUG_BUFFER_SIZE; i++) {
+    for (int i = 0; i < POLLER_BIT_DEBUG_BUFFER_SIZE; i++) {
       FURI_LOG_D(TAG, "bit idx: %d, diff: %d", i, bit_debug[i]);
     }
   }
@@ -507,13 +508,13 @@ static int32_t p_listener_rx(uint8_t *len, int32_t *raw) {
                "wrong bit length! raw_frame: 0x%08lX, xored_frame: 0%08lX, "
                "len: %d rng steps: %ld",
                raw_frame, xored_frame, bit_idx, legic_prng_get_count());
-    for (int i = 0; i < BIT_DEBUG_BUFFER_SIZE; i++) {
+    for (int i = 0; i < POLLER_BIT_DEBUG_BUFFER_SIZE; i++) {
       FURI_LOG_E(TAG, "bit idx: %d, diff: %d", i, bit_debug[i]);
     }
-    memset(bit_errors, 0, sizeof(int) * BIT_DEBUG_BUFFER_SIZE);
+    memset(bit_errors, 0, sizeof(int) * POLLER_BIT_DEBUG_BUFFER_SIZE);
   }
 
-  legic_prng_forward(rng_steps_rx);
+  legic_prng_forward(LISTENER_RNG_STEPS_RX);
   xored_frame = raw_frame ^ legic_prng_get_bits(bit_idx);
 
   *raw = raw_frame;
@@ -529,7 +530,7 @@ static void p_listener_tx(uint32_t tx_data, size_t tx_bits) {
                          FuriFlagWaitAny, FuriWaitForever);
   furi_hal_nfc_timer_fwt_stop();
 
-  legic_prng_forward(rng_steps_tx);
+  legic_prng_forward(LISTENER_RNG_STEPS_TX);
   legic_prime_signal_tx(legic_prime_signal,
                         tx_data ^ legic_prng_get_bits(tx_bits), tx_bits, false);
 }
@@ -543,7 +544,7 @@ static void p_listener_tx_ack(void) {
   furi_hal_nfc_timer_fwt_stop();
   // furi_delay_us(LISTENER_ACK_DELAY_US);
 
-  legic_prng_forward(rng_steps_write_ack);
+  legic_prng_forward(LISTENER_RNG_STEPS_WRITE_ACK);
   legic_prime_signal_tx(legic_prime_signal, 1, 1, false);
   legic_prng_forward(1);
 }
@@ -630,7 +631,7 @@ static FuriHalNfcError p_listener_setup_phase(LegicPrimeTag *p_card) {
     }
     break;
   }
-  legic_prng_backup(rng_steps_setup_back);
+  legic_prng_backup(LISTENER_RNG_STEPS_SETUP_BACK);
   return FuriHalNfcErrorNone;
 }
 
@@ -649,7 +650,7 @@ static FuriHalNfcError p_listener_connected_phase(LegicPrimeTag *p_card,
   // check if command is LEGIC_READ
   if (len == p_card->cmdsize) {
     // prepare data
-    uint8_t byte = sim_tag->data[cmd >> 1];
+    uint8_t byte = listener_sim_tag->data[cmd >> 1];
     uint8_t crc = calc_crc4(cmd, p_card->cmdsize, byte);
 
     // transmit data
@@ -679,7 +680,7 @@ static FuriHalNfcError p_listener_connected_phase(LegicPrimeTag *p_card,
 
     FURI_LOG_T(TAG, "Write successful @ addr: %02x, data: %02x", addr, byte);
     // store data
-    sim_tag->data[addr] = byte;
+    listener_sim_tag->data[addr] = byte;
 
     // transmit ack
     p_listener_tx_ack();
@@ -827,7 +828,7 @@ furi_hal_nfc_legic_prime_listener_wait_event(uint32_t timeout_ms) {
   if (event & FuriHalNfcEventFieldOn) {
     p_enter_transparent(handle);
     do {
-      FuriHalNfcError error = p_listener_setup_phase(&sim_tag->tag);
+      FuriHalNfcError error = p_listener_setup_phase(&listener_sim_tag->tag);
       if (error != FuriHalNfcErrorNone) {
         FURI_LOG_E(TAG, "Listener setup phase failed: %d", error);
         event = FuriHalNfcEventTimeout;
@@ -836,7 +837,7 @@ furi_hal_nfc_legic_prime_listener_wait_event(uint32_t timeout_ms) {
       uint16_t bytes_written = 0;
       uint16_t bytes_read = 0;
       while (true) {
-        error = p_listener_connected_phase(&sim_tag->tag, &bytes_read,
+        error = p_listener_connected_phase(&listener_sim_tag->tag, &bytes_read,
                                            &bytes_written);
         if (error != FuriHalNfcErrorNone) {
           FURI_LOG_D(TAG, "Listener connected phase returned %d", error);
@@ -858,15 +859,15 @@ furi_hal_nfc_legic_prime_listener_tx(const FuriHalSpiBusHandle *handle,
                                      const uint8_t *tx_data, size_t tx_bits) {
   UNUSED(handle);
   UNUSED(tx_bits);
-  furi_check(sim_tag == NULL);
+  furi_check(listener_sim_tag == NULL);
 
   FuriHalNfcError error = FuriHalNfcErrorNone;
 
-  sim_tag = malloc(sizeof(LegicPrimeData));
-  memset(sim_tag, 0, sizeof(LegicPrimeData));
+  listener_sim_tag = malloc(sizeof(LegicPrimeData));
+  memset(listener_sim_tag, 0, sizeof(LegicPrimeData));
 
   LegicPrimeListenerTrxData *trx_data = (LegicPrimeListenerTrxData *)tx_data;
-  memcpy(sim_tag, &trx_data->data, sizeof(LegicPrimeData));
+  memcpy(listener_sim_tag, &trx_data->data, sizeof(LegicPrimeData));
 
   return error;
 }
@@ -878,14 +879,14 @@ furi_hal_nfc_legic_prime_listener_rx(const FuriHalSpiBusHandle *handle,
   UNUSED(handle);
   UNUSED(rx_data_size);
   UNUSED(rx_bits);
-  furi_check(sim_tag != NULL);
+  furi_check(listener_sim_tag != NULL);
 
   LegicPrimeListenerTrxData *trx_data = (LegicPrimeListenerTrxData *)rx_data;
-  memcpy(&trx_data->data, sim_tag, sizeof(LegicPrimeData));
+  memcpy(&trx_data->data, listener_sim_tag, sizeof(LegicPrimeData));
 
-  if (sim_tag) {
-    free(sim_tag);
-    sim_tag = NULL;
+  if (listener_sim_tag) {
+    free(listener_sim_tag);
+    listener_sim_tag = NULL;
   }
   return FuriHalNfcErrorNone;
 }
@@ -909,7 +910,7 @@ furi_hal_nfc_legic_prime_poller_tx(const FuriHalSpiBusHandle *handle,
   furi_check(tx_data);
   furi_check(legic_prime_signal);
   UNUSED(tx_bits);
-  furi_check(rx_buf == NULL);
+  furi_check(poller_rx_buf == NULL);
 
   LegicPrimePollerTrxData *trx_data = (LegicPrimePollerTrxData *)tx_data;
   FuriHalNfcError error = FuriHalNfcErrorNone;
@@ -917,21 +918,21 @@ furi_hal_nfc_legic_prime_poller_tx(const FuriHalSpiBusHandle *handle,
   // init crc calculator
   crc_init(&legic_crc, 4, 0x19 >> 1, 0x05, 0);
 
-  rx_buf = malloc(sizeof(uint16_t) * 1024);
-  memset(rx_buf, 0, 1024 * sizeof(uint16_t));
+  poller_rx_buf = malloc(sizeof(uint16_t) * 1024);
+  memset(poller_rx_buf, 0, 1024 * sizeof(uint16_t));
 
-  ones_per_slot = malloc(sizeof(uint16_t) * MAX_ANSWER_BITS);
-  memset(ones_per_slot, 0, MAX_ANSWER_BITS * sizeof(uint16_t));
-  ones_before_start = 0;
+  poller_ones_per_slot = malloc(sizeof(uint16_t) * POLLER_MAX_ANSWER_BITS);
+  memset(poller_ones_per_slot, 0, POLLER_MAX_ANSWER_BITS * sizeof(uint16_t));
+  poller_ones_before_start = 0;
   irq_bits = 0;
 
   p_enter_transparent(handle);
 
   do {
-    tag_type = p_poller_setup(MAX_RX_ERRORS);
+    poller_tag_type = p_poller_setup(POLLER_MAX_RX_ERRORS);
 
     // If no card is detected, we should return some kind of error!
-    if (!tag_type) {
+    if (!poller_tag_type) {
       error = FuriHalNfcErrorNone;
       break;
     }
@@ -963,14 +964,14 @@ furi_hal_nfc_legic_prime_poller_tx(const FuriHalSpiBusHandle *handle,
         error_cnt++;
         trx_data->total_errors++;
       }
-      if (error_cnt > MAX_RX_ERRORS) {
+      if (error_cnt > POLLER_MAX_RX_ERRORS) {
         error = FuriHalNfcErrorIncompleteFrame;
 
-        if (rx_buf) {
-          free(rx_buf);
-          rx_buf = NULL;
-          free(ones_per_slot);
-          ones_per_slot = NULL;
+        if (poller_rx_buf) {
+          free(poller_rx_buf);
+          poller_rx_buf = NULL;
+          free(poller_ones_per_slot);
+          poller_ones_per_slot = NULL;
         }
         break;
       }
@@ -996,23 +997,23 @@ furi_hal_nfc_legic_prime_poller_rx(const FuriHalSpiBusHandle *handle,
   do {
     // If this is the answer to a tag detect command, return immediately.
     if (!trx_data->tag.tagtype) {
-      trx_data->tag.tagtype = tag_type;
+      trx_data->tag.tagtype = poller_tag_type;
       FURI_LOG_D(TAG, "responding to activate cmd");
       break;
     }
 
     for (size_t i = 0; i < trx_data->num_addrs; i++) {
-      trx_data->response_data[i] = rx_buf[i] & 0xff;
+      trx_data->response_data[i] = poller_rx_buf[i] & 0xff;
       *rx_bits = i * BITS_IN_BYTE;
     }
 
   } while (false);
 
-  if (rx_buf) {
-    free(rx_buf);
-    rx_buf = NULL;
-    free(ones_per_slot);
-    ones_per_slot = NULL;
+  if (poller_rx_buf) {
+    free(poller_rx_buf);
+    poller_rx_buf = NULL;
+    free(poller_ones_per_slot);
+    poller_ones_per_slot = NULL;
   }
 
   return error;
@@ -1037,7 +1038,7 @@ const FuriHalNfcTechBase furi_hal_nfc_legic_prime = {
         {
             .compensation =
                 {
-                    .fdt = FURI_HAL_NFC_LEGIC_PRIME_LISTENER_FDT_COMP_FC,
+                    .fdt = (INT32_MAX),
                 },
             .init = furi_hal_nfc_legic_prime_listener_init,
             .deinit = furi_hal_nfc_legic_prime_listener_deinit,
