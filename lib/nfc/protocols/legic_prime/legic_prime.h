@@ -45,8 +45,6 @@ typedef struct {
 
 /** @brief Structure used to store LegicPrime data and additional values about reading */
 typedef struct {
-    // uint16_t blocks_total;
-    // uint16_t blocks_read;
     LegicPrimeTag tag;
     uint8_t data[1024];
 } LegicPrimeData;

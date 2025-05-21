@@ -30,8 +30,8 @@
  * s/static volatile int32_t \(\w\+\) = \((\d\+)\);/#define \1 \2/
  */
 static volatile int32_t WRITE_ACK_DELAY = (3540); // ~3.6ms
-static volatile int32_t BIT_T_1 = (40);
-static volatile int32_t BIT_T_1_TOL = (10);
+static volatile int32_t BIT_T_1 = (80);
+static volatile int32_t BIT_T_1_TOL = (20);
 static volatile int32_t ACK_PAUSE_COMP = (142);
 static volatile int32_t RX_FWT_READ_T =
     (21400); // ~1755us from the end of the poller's EOF bit to the start of the
@@ -66,23 +66,20 @@ static volatile int32_t rng_steps_tx = (2);
 static volatile int32_t rng_steps_setup_back = (1);
 static volatile int32_t rng_steps_write_ack = (35);
 
-LegicPrimeData *sim_tag;
-// static uint8_t legic_mem[1024];
-uint16_t rx_buf[1024];
 static volatile bool bypass_crc_check = 0;
 
-static volatile int16_t irq_bits = 0;
-
+LegicPrimeData *sim_tag = NULL;
+uint16_t *rx_buf = NULL;
 static LegicPrime_Signal *legic_prime_signal = NULL;
 
+static uint16_t *ones_per_slot = NULL;
 static uint16_t ones_before_start = 0;
-static uint16_t ones_per_slot[MAX_ANSWER_BITS] = {0};
+static volatile int16_t irq_bits = 0;
 
 static crc_t legic_crc;
 static uint32_t cmd = 0;
 static uint8_t tag_type = 0;
 static bool transparent_mode = 0;
-static bool setup_successful = 0;
 
 /*
  * This is the most important part of this whole thing!
@@ -133,7 +130,6 @@ static void p_enter_transparent(const FuriHalSpiBusHandle *handle) {
   // Reconfigure gpio for Transparent mode
   furi_hal_spi_bus_handle_deinit(&furi_hal_spi_bus_handle_nfc);
 
-  setup_successful = 0;
   transparent_mode = 1;
 }
 
@@ -148,7 +144,6 @@ static void p_exit_transparent(const FuriHalSpiBusHandle *handle) {
   furi_hal_gpio_write(&gpio_spi_r_mosi, false);
   furi_hal_spi_bus_handle_init(&furi_hal_spi_bus_handle_nfc);
 
-  setup_successful = 0;
   transparent_mode = 0;
 }
 
@@ -211,7 +206,14 @@ FuriHalNfcError p_poller_tx(uint32_t tx_data, size_t tx_bits) {
   }
 
   // configure miso gpio as interrupt pin and add callback to fill buffer
-  furi_hal_gpio_init(&gpio_spi_r_miso, GpioModeInterruptRise, GpioPullDown,
+  /*
+   * FIXME: @flipper gpio hal:
+   * This used to be GpioModeInterruptRise only, but after using listener rx,
+   * which uses GpioModeInterruptRiseFall, the poller isr oddly received twice
+   * as many irqs, which indicates that the furi_hal_gpio_init() function does
+   * not work properly and does not reset the irq bits!
+   * */
+  furi_hal_gpio_init(&gpio_spi_r_miso, GpioModeInterruptRiseFall, GpioPullDown,
                      GpioSpeedVeryHigh);
   furi_hal_gpio_add_int_callback(&gpio_spi_r_miso, p_rx_cb, NULL);
 
@@ -252,6 +254,7 @@ FuriHalNfcError p_poller_tx(uint32_t tx_data, size_t tx_bits) {
   furi_hal_gpio_remove_int_callback(&gpio_spi_r_miso);
   furi_thread_flags_wait(FuriHalNfcEventInternalTypeTimerFwtExpired,
                          FuriFlagWaitAny, FuriWaitForever);
+  furi_hal_nfc_timer_fwt_stop();
 
   /*
    * With trace logging enabled, only the first setup answer can be observed.
@@ -314,8 +317,6 @@ static uint8_t p_poller_setup(uint32_t timeout) {
   uint16_t ack_frame = 0;
   uint16_t answer_frame = 0;
 
-  setup_successful = 0;
-
   do {
     furi_delay_ms(5);
     legic_prng_init(0);
@@ -351,7 +352,6 @@ static uint8_t p_poller_setup(uint32_t timeout) {
   if (!ack_frame)
     return 0;
 
-  setup_successful = 1;
   p_poller_tx(ack_frame, 6);
   furi_delay_us(ACK_PAUSE_COMP);
 
@@ -911,6 +911,7 @@ furi_hal_nfc_legic_prime_poller_tx(const FuriHalSpiBusHandle *handle,
   furi_check(tx_data);
   furi_check(legic_prime_signal);
   UNUSED(tx_bits);
+  furi_check(rx_buf == NULL);
 
   LegicPrimePollerTrxData *trx_data = (LegicPrimePollerTrxData *)tx_data;
   FuriHalNfcError error = FuriHalNfcErrorNone;
@@ -918,8 +919,13 @@ furi_hal_nfc_legic_prime_poller_tx(const FuriHalSpiBusHandle *handle,
   // init crc calculator
   crc_init(&legic_crc, 4, 0x19 >> 1, 0x05, 0);
 
-  // TODO: put this on the heap when everything runs!
+  rx_buf = malloc(sizeof(uint16_t) * 1024);
   memset(rx_buf, 0, 1024 * sizeof(uint16_t));
+
+  ones_per_slot = malloc(sizeof(uint16_t) * MAX_ANSWER_BITS);
+  memset(ones_per_slot, 0, MAX_ANSWER_BITS * sizeof(uint16_t));
+  ones_before_start = 0;
+  irq_bits = 0;
 
   p_enter_transparent(handle);
 
@@ -961,6 +967,13 @@ furi_hal_nfc_legic_prime_poller_tx(const FuriHalSpiBusHandle *handle,
       }
       if (error_cnt > MAX_RX_ERRORS) {
         error = FuriHalNfcErrorIncompleteFrame;
+
+        if (rx_buf) {
+          free(rx_buf);
+          rx_buf = NULL;
+          free(ones_per_slot);
+          ones_per_slot = NULL;
+        }
         break;
       }
     }
@@ -996,6 +1009,13 @@ furi_hal_nfc_legic_prime_poller_rx(const FuriHalSpiBusHandle *handle,
     }
 
   } while (false);
+
+  if (rx_buf) {
+    free(rx_buf);
+    rx_buf = NULL;
+    free(ones_per_slot);
+    ones_per_slot = NULL;
+  }
 
   return error;
 }
