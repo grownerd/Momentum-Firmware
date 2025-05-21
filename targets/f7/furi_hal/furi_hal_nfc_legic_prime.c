@@ -19,6 +19,7 @@
 #define BITS_IN_BYTE (8)
 #define MAX_ANSWER_BITS (12)
 #define BIT_DEBUG_BUFFER_SIZE (64)
+#define POLLER_SETUP_IV_VAL (0x55)
 
 /*
  * These should be constatns, but in order to be able to adjust timings
@@ -29,20 +30,20 @@
  * s/#define \(\w\+\) \((\d\+)\)\(.*\)/static volatile int32_t \1 = \2;\3/
  * s/static volatile int32_t \(\w\+\) = \((\d\+)\);/#define \1 \2/
  */
-static volatile int32_t WRITE_ACK_DELAY = (3540); // ~3.6ms
-static volatile int32_t BIT_T_1 = (80);
-static volatile int32_t BIT_T_1_TOL = (20);
-static volatile int32_t ACK_PAUSE_COMP = (142);
-static volatile int32_t RX_FWT_READ_T =
+static volatile int32_t POLLER_WRITE_ACK_DELAY = (3540); // ~3.6ms
+static volatile int32_t POLLER_BIT_IRQ_COUNT = (80);
+static volatile int32_t POLLER_BIT_IRQ_COUNT_TOL = (20);
+static volatile int32_t POLLER_ACK_PAUSE = (142);
+static volatile int32_t POLLER_RX_FWT_READ_T =
     (21400); // ~1755us from the end of the poller's EOF bit to the start of the
              // first bit in the next poller frame. To be able to read more than
              // one byte at a time (aka one byte per setup phase), this timing
              // is crucial!
-static volatile int32_t RX_FWT_WRITE_T =
+static volatile int32_t POLLER_RX_FWT_WRITE_T =
     (50600); // ~4ms is what the pm3 does, so 4ms is what we do.
-static volatile int32_t RX_FWT_ACK_T = (13500); // ~1155us
-static volatile int32_t RX_LOOP_T = (95);
-static volatile int32_t BIT_T_START_DELAY =
+static volatile int32_t POLLER_RX_FWT_ACK_T = (13500); // ~1155us
+static volatile int32_t POLLER_RX_LOOP_T = (95);
+static volatile int32_t POLLER_BIT_T_START_DELAY =
     (270); // 12bits * 100us loop time + 270us start delay == 1470us --> no more
            // than 295us left to do stuff like signal encoding or crc checking!
 
@@ -158,12 +159,56 @@ static void p_reset_tag(const FuriHalSpiBusHandle *handle) {
 }
 #endif
 
+uint16_t p_poller_decode_bits(size_t rx_bits) {
+
+  uint16_t bits = 0x0000;
+  uint8_t bit_idx = 0;
+  uint16_t remaining_bits = 0;
+
+  for (int i = 0; i < MAX_ANSWER_BITS; i++) {
+    if (remaining_bits) {
+      if (is_within_tolerance((remaining_bits + ones_per_slot[i]),
+                              POLLER_BIT_IRQ_COUNT, POLLER_BIT_IRQ_COUNT_TOL)) {
+        bits |= 1 << bit_idx++;
+        FURI_LOG_T(TAG, "adding ONE in slot %d, bits: %d remaining bits: %d", i,
+                   ones_per_slot[i], remaining_bits);
+      } else {
+        bits |= 0 << bit_idx++;
+        FURI_LOG_T(TAG, "unused bits! slot %d, bits: %d", i, remaining_bits);
+      }
+
+      remaining_bits = 0;
+    } else if (ones_per_slot[i] >=
+               (POLLER_BIT_IRQ_COUNT - POLLER_BIT_IRQ_COUNT_TOL)) {
+      uint16_t condensed_bits = ones_per_slot[i] / POLLER_BIT_IRQ_COUNT;
+      remaining_bits = ones_per_slot[i] % POLLER_BIT_IRQ_COUNT;
+      if (is_within_tolerance(remaining_bits, POLLER_BIT_IRQ_COUNT,
+                              POLLER_BIT_IRQ_COUNT_TOL)) {
+        remaining_bits = 0;
+        condensed_bits++;
+      }
+
+      for (int j = 1; j <= condensed_bits; j++) {
+        if (is_within_tolerance(ones_per_slot[i], POLLER_BIT_IRQ_COUNT * j,
+                                POLLER_BIT_IRQ_COUNT_TOL)) {
+        }
+        bits |= 1 << bit_idx++;
+        FURI_LOG_T(TAG, "adding ONE in slot %d, bits: %d remaining bits: %d", i,
+                   ones_per_slot[i], remaining_bits);
+      }
+    } else {
+      remaining_bits = ones_per_slot[i] % POLLER_BIT_IRQ_COUNT;
+      bits |= 0 << bit_idx++;
+      FURI_LOG_T(TAG, "adding NULL in slot %d, bits: %d remaining bits: %d", i,
+                 ones_per_slot[i], remaining_bits);
+    }
+  }
+
+  return (rx_bits > 1) ? bits ^ legic_prng_get_bits(rx_bits) : bits;
+}
+
 FuriHalNfcError p_poller_tx(uint32_t tx_data, size_t tx_bits) {
   furi_check(legic_prime_signal);
-
-  uint8_t bits_expected = 0;
-  uint32_t rx_fwt = 0;
-  uint32_t rx_bit_start_delay = 0;
 
   /*
    * Send the signal. Keep in mind that the time the encoding takes, varies with
@@ -171,34 +216,32 @@ FuriHalNfcError p_poller_tx(uint32_t tx_data, size_t tx_bits) {
    */
   legic_prime_signal_tx(legic_prime_signal,
                         tx_data ^ legic_prng_get_bits(tx_bits), tx_bits, true);
+  return FuriHalNfcErrorNone;
+}
 
-  /*
-   * we can't rely on the rx command coming at a defined time, so we
-   * have to start the actual receiving of the answer right here.
-   */
-  switch (tx_bits) {
-  case 6:
+uint16_t p_poller_rx(size_t rx_bits) {
+  uint8_t bits_expected = rx_bits;
+  uint32_t rx_fwt = 0;
+  uint32_t rx_bit_start_delay = 0;
+
+  switch (rx_bits) {
+  case 0:
     return FuriHalNfcErrorNone;
 
-  case 7:
-    rx_fwt = RX_FWT_ACK_T;
-    rx_bit_start_delay = BIT_T_START_DELAY;
-    bits_expected = 6;
+  case 6:
+    rx_fwt = POLLER_RX_FWT_ACK_T;
+    rx_bit_start_delay = POLLER_BIT_T_START_DELAY;
     break;
 
-  case 9:
-  case 11:
-    rx_fwt = RX_FWT_READ_T;
-    rx_bit_start_delay = BIT_T_START_DELAY;
-    bits_expected = MAX_ANSWER_BITS;
+  case 12:
+    rx_fwt = POLLER_RX_FWT_READ_T;
+    rx_bit_start_delay = POLLER_BIT_T_START_DELAY;
     break;
 
-  case 21:
-  case 23:
+  case 1:
     // wait for a single ack bit after 3.6ms!
-    rx_fwt = RX_FWT_WRITE_T;
-    rx_bit_start_delay = WRITE_ACK_DELAY;
-    bits_expected = 1;
+    rx_fwt = POLLER_RX_FWT_WRITE_T;
+    rx_bit_start_delay = POLLER_WRITE_ACK_DELAY;
     break;
 
   default:
@@ -207,11 +250,11 @@ FuriHalNfcError p_poller_tx(uint32_t tx_data, size_t tx_bits) {
 
   // configure miso gpio as interrupt pin and add callback to fill buffer
   /*
-   * FIXME: @flipper gpio hal:
+   * FIXME: @ flipper hal gpio team:
    * This used to be GpioModeInterruptRise only, but after using listener rx,
    * which uses GpioModeInterruptRiseFall, the poller isr oddly received twice
    * as many irqs, which indicates that the furi_hal_gpio_init() function does
-   * not work properly and does not reset the irq bits!
+   * not work properly and does not reset the irq mode bits before setting them.
    * */
   furi_hal_gpio_init(&gpio_spi_r_miso, GpioModeInterruptRiseFall, GpioPullDown,
                      GpioSpeedVeryHigh);
@@ -237,7 +280,7 @@ FuriHalNfcError p_poller_tx(uint32_t tx_data, size_t tx_bits) {
   ones_before_start = irq_bits;
   irq_bits = 0;
   while (bits_expected--) {
-    furi_delay_us(RX_LOOP_T);
+    furi_delay_us(POLLER_RX_LOOP_T);
 
     FURI_CRITICAL_ENTER();
     ones_per_slot[bit_idx] = irq_bits;
@@ -264,56 +307,11 @@ FuriHalNfcError p_poller_tx(uint32_t tx_data, size_t tx_bits) {
     FURI_LOG_T(TAG, "bits in slot %02d: %4d", i, ones_per_slot[i]);
   }
 
-  return FuriHalNfcErrorNone;
-}
-
-uint16_t p_poller_rx(size_t rx_bits) {
-
-  uint16_t bits = 0x0000;
-  uint8_t bit_idx = 0;
-  uint16_t remaining_bits = 0;
-
-  for (int i = 0; i < MAX_ANSWER_BITS; i++) {
-    if (remaining_bits) {
-      if (is_within_tolerance((remaining_bits + ones_per_slot[i]), BIT_T_1,
-                              BIT_T_1_TOL)) {
-        bits |= 1 << bit_idx++;
-        FURI_LOG_T(TAG, "adding ONE in slot %d, bits: %d remaining bits: %d", i,
-                   ones_per_slot[i], remaining_bits);
-      } else {
-        bits |= 0 << bit_idx++;
-        FURI_LOG_T(TAG, "unused bits! slot %d, bits: %d", i, remaining_bits);
-      }
-
-      remaining_bits = 0;
-    } else if (ones_per_slot[i] >= (BIT_T_1 - BIT_T_1_TOL)) {
-      uint16_t condensed_bits = ones_per_slot[i] / BIT_T_1;
-      remaining_bits = ones_per_slot[i] % BIT_T_1;
-      if (is_within_tolerance(remaining_bits, BIT_T_1, BIT_T_1_TOL)) {
-        remaining_bits = 0;
-        condensed_bits++;
-      }
-
-      for (int j = 1; j <= condensed_bits; j++) {
-        if (is_within_tolerance(ones_per_slot[i], BIT_T_1 * j, BIT_T_1_TOL)) {
-        }
-        bits |= 1 << bit_idx++;
-        FURI_LOG_T(TAG, "adding ONE in slot %d, bits: %d remaining bits: %d", i,
-                   ones_per_slot[i], remaining_bits);
-      }
-    } else {
-      remaining_bits = ones_per_slot[i] % BIT_T_1;
-      bits |= 0 << bit_idx++;
-      FURI_LOG_T(TAG, "adding NULL in slot %d, bits: %d remaining bits: %d", i,
-                 ones_per_slot[i], remaining_bits);
-    }
-  }
-
-  return (rx_bits > 1) ? bits ^ legic_prng_get_bits(rx_bits) : bits;
+  return p_poller_decode_bits(rx_bits);
 }
 
 static uint8_t p_poller_setup(uint32_t timeout) {
-  uint16_t iv_frame = 0x55;
+  uint16_t iv_frame = POLLER_SETUP_IV_VAL;
   uint16_t ack_frame = 0;
   uint16_t answer_frame = 0;
 
@@ -353,7 +351,7 @@ static uint8_t p_poller_setup(uint32_t timeout) {
     return 0;
 
   p_poller_tx(ack_frame, 6);
-  furi_delay_us(ACK_PAUSE_COMP);
+  furi_delay_us(POLLER_ACK_PAUSE);
 
   return (uint8_t)answer_frame & 0xff;
 }
