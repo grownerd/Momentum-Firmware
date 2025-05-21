@@ -30,7 +30,8 @@
 static volatile int32_t POLLER_WRITE_ACK_DELAY = (3540); // ~3.6ms
 static volatile int32_t POLLER_BIT_IRQ_COUNT = (80);
 static volatile int32_t POLLER_BIT_IRQ_COUNT_TOL = (20);
-static volatile int32_t POLLER_ACK_PAUSE = (142);
+static volatile int32_t POLLER_ACK_PAUSE_READ = (142);
+static volatile int32_t POLLER_ACK_PAUSE_WRITE = (85);
 static volatile int32_t POLLER_RX_FWT_READ_T =
     (21400); // ~1755us from the end of the poller's EOF bit to the start of the
              // first bit in the next poller frame. To be able to read more than
@@ -349,16 +350,15 @@ static uint8_t p_poller_setup(uint32_t timeout) {
     return 0;
 
   p_poller_tx(ack_frame, 6);
-  furi_delay_us(POLLER_ACK_PAUSE);
 
   return (uint8_t)answer_frame & 0xff;
 }
 
-static bool p_read_byte(uint16_t addr, size_t cmd_sz) {
-  uint16_t cmd = 0;
+static bool p_poller_read_byte(uint16_t addr, size_t cmd_sz) {
+
+  uint16_t cmd = (addr << 1) | LegicPrimeCmdRead;
 
   legic_prng_forward(2);
-  cmd = (addr << 1) | LegicPrimeCmdRead;
   p_poller_tx(cmd, cmd_sz);
   legic_prng_forward(2);
   poller_rx_buf[addr] = p_poller_rx(POLLER_MAX_ANSWER_BITS);
@@ -368,12 +368,10 @@ static bool p_read_byte(uint16_t addr, size_t cmd_sz) {
           poller_bypass_crc_check);
 }
 
-static bool p_write_byte(uint16_t addr, uint8_t data, size_t addr_sz) {
-  uint16_t cmd = 0;
+static bool p_poller_write_byte(uint16_t addr, uint8_t data, size_t addr_sz) {
 
+  uint32_t cmd = (addr << 1) | LegicPrimeCmdWrite;
   uint16_t cmd_sz = addr_sz + 1 + 8 + 4; // cmd_sz = addr_sz + cmd + data + crc
-
-  cmd = (addr << 1) | LegicPrimeCmdWrite;
 
   uint8_t crc = calc_crc4(cmd, addr_sz + 1, data); // calculate crc
   cmd |= data << (addr_sz + 1);                    // append value
@@ -387,6 +385,28 @@ static bool p_write_byte(uint16_t addr, uint8_t data, size_t addr_sz) {
 
   return poller_rx_buf[addr];
 }
+
+#if 0
+static bool p_poller_recover_error(uint16_t addr, uint8_t data, size_t cmd_sz,
+                                   LegicPrimeCmd cmd) {
+  uint8_t last_byte = 0;
+  for (int i = 0; i < 4; i++) {
+    if (cmd) {
+      if (!p_poller_read_byte(addr, cmd_sz))
+        return false;
+
+      if (i && (last_byte != poller_rx_buf[addr]))
+        return false;
+
+      last_byte = poller_rx_buf[addr];
+    } else {
+      if (!p_poller_write_byte(addr, data, cmd_sz - 1))
+        return false;
+    }
+  }
+  return true;
+}
+#endif
 
 /*
  * Private Listener functions
@@ -947,19 +967,25 @@ furi_hal_nfc_legic_prime_poller_tx(const FuriHalSpiBusHandle *handle,
     size_t tx_bytes = trx_data->num_addrs;
     uint32_t error_cnt = 0;
     bool success = false;
+    furi_delay_us(cmd == LegicPrimeCmdRead ? POLLER_ACK_PAUSE_READ
+                                           : POLLER_ACK_PAUSE_WRITE);
 
     for (size_t i = 0; i < tx_bytes; i++) {
       if (cmd == LegicPrimeCmdRead) {
-        success = p_read_byte(trx_data->addrs[i], trx_data->tag.cmdsize);
+        success = p_poller_read_byte(trx_data->addrs[i], trx_data->tag.cmdsize);
       } else if (cmd == LegicPrimeCmdWrite) {
-        success = p_write_byte(trx_data->addrs[i], trx_data->write_data[i],
-                               trx_data->tag.addrsize);
+        success =
+            p_poller_write_byte(trx_data->addrs[i], trx_data->write_data[i],
+                                trx_data->tag.addrsize);
       }
 
       if (success) {
         error_cnt = 0;
         trx_data->bytes_processed++;
       } else {
+        // } else if (!p_poller_recover_error(trx_data->addrs[i],
+        //                                    trx_data->write_data[i],
+        //                                    trx_data->tag.cmdsize, cmd)) {
         i--;
         error_cnt++;
         trx_data->total_errors++;
