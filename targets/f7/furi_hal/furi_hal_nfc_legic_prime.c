@@ -31,14 +31,14 @@ static volatile int32_t POLLER_WRITE_ACK_DELAY = (3540); // ~3.6ms
 static volatile int32_t POLLER_BIT_IRQ_COUNT = (80);
 static volatile int32_t POLLER_BIT_IRQ_COUNT_TOL = (20);
 static volatile int32_t POLLER_ACK_PAUSE_READ = (142);
-static volatile int32_t POLLER_ACK_PAUSE_WRITE = (85);
+static volatile int32_t POLLER_ACK_PAUSE_WRITE = (78);
 static volatile int32_t POLLER_RX_FWT_READ_T =
     (21400); // ~1755us from the end of the poller's EOF bit to the start of the
              // first bit in the next poller frame. To be able to read more than
              // one byte at a time (aka one byte per setup phase), this timing
              // is crucial!
 static volatile int32_t POLLER_RX_FWT_WRITE_T =
-    (50600); // ~4ms is what the pm3 does, so 4ms is what we do.
+    (50500); // ~4ms is what the pm3 does, so 4ms is what we do.
 static volatile int32_t POLLER_RX_FWT_ACK_T = (13500); // ~1155us
 static volatile int32_t POLLER_RX_LOOP_T = (95);
 static volatile int32_t POLLER_BIT_T_START_DELAY =
@@ -386,7 +386,7 @@ static bool p_poller_write_byte(uint16_t addr, uint8_t data, size_t addr_sz) {
   return poller_rx_buf[addr];
 }
 
-#if 0
+#if 1
 static bool p_poller_recover_error(uint16_t addr, uint8_t data, size_t cmd_sz,
                                    LegicPrimeCmd cmd) {
   uint8_t last_byte = 0;
@@ -982,10 +982,10 @@ furi_hal_nfc_legic_prime_poller_tx(const FuriHalSpiBusHandle *handle,
       if (success) {
         error_cnt = 0;
         trx_data->bytes_processed++;
-      } else {
-        // } else if (!p_poller_recover_error(trx_data->addrs[i],
-        //                                    trx_data->write_data[i],
-        //                                    trx_data->tag.cmdsize, cmd)) {
+        // } else {
+      } else if (!p_poller_recover_error(trx_data->addrs[i],
+                                         trx_data->write_data[i],
+                                         trx_data->tag.cmdsize, cmd)) {
         i--;
         error_cnt++;
         trx_data->total_errors++;
