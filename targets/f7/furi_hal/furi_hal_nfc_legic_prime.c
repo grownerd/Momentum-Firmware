@@ -13,7 +13,7 @@
 #define TAG "FuriHalLegicPrime"
 
 #define BITS_IN_BYTE (8)
-#define POLLER_MAX_RX_ERRORS (100)
+#define POLLER_MAX_RX_ERRORS (10)
 #define POLLER_MAX_ANSWER_BITS (12)
 #define POLLER_BIT_DEBUG_BUFFER_SIZE (64)
 #define POLLER_SETUP_IV_VAL (0x55)
@@ -32,8 +32,9 @@ static volatile int32_t POLLER_BIT_IRQ_COUNT = (80);
 static volatile int32_t POLLER_BIT_IRQ_COUNT_TOL = (20);
 static volatile int32_t POLLER_ACK_PAUSE_READ = (142);
 static volatile int32_t POLLER_ACK_PAUSE_WRITE = (78);
+
 static volatile int32_t POLLER_RX_FWT_READ_T =
-    (21400); // ~1755us from the end of the poller's EOF bit to the start of the
+    (21300); // ~1755us from the end of the poller's EOF bit to the start of the
              // first bit in the next poller frame. To be able to read more than
              // one byte at a time (aka one byte per setup phase), this timing
              // is crucial!
@@ -238,7 +239,6 @@ uint16_t p_poller_rx(size_t rx_bits) {
     break;
 
   case 1:
-    // wait for a single ack bit after 3.6ms!
     rx_fwt = POLLER_RX_FWT_WRITE_T;
     rx_bit_start_delay = POLLER_WRITE_ACK_DELAY;
     break;
