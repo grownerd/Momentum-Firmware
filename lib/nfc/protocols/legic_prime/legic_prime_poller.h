@@ -66,7 +66,7 @@ typedef struct {
 } LegicPrimePollerEvent;
 
 /**
- * @brief Perform collision resolution procedure.
+ * @brief Detect presence of a Legic Prime tag.
  *
  * Must ONLY be used inside the callback function.
  *

@@ -14,12 +14,6 @@
     0x4f val: 0x32 (== dec 50, == amount paid???)
     amount paid addr: 0x4f, 0x50?
 
-
-    How to get free parking:
-    ========================
-
-    Turns out, all you have to do is set address 0x44 to 1.
-    Also, the entry timestamp cannot be too far in the past.
 */
 
 #if 0
@@ -36,7 +30,6 @@
 #define AMOUNT_PAID_ADDR 0x4f
 #define MYSTERY_BYTE_1 0x3c
 #define MYSTERY_BYTE_2 0x3d
-#define EXIT_FREE 0x44
 
 static DateTime tm_ref = {
     .hour = 0,
@@ -74,7 +67,7 @@ static time_t card_ts_to_time_t(uint16_t days, uint16_t mins) {
 }
 #endif
 
-NfcCommand nfc_scene_legic_prime_set_0x44_worker_callback(NfcGenericEvent event,
+NfcCommand nfc_scene_legic_prime_set_0x43_worker_callback(NfcGenericEvent event,
                                                           void *context) {
   furi_assert(context);
   furi_assert(event.event_data);
@@ -91,8 +84,8 @@ NfcCommand nfc_scene_legic_prime_set_0x44_worker_callback(NfcGenericEvent event,
     const LegicPrimeData *read_data =
         nfc_device_get_data(instance->nfc_device, NfcProtocolLegicPrime);
 
-    write_bytes[0x44] = 0x01 ^ read_data->data[4];
-    write_mask[0x44] = 0xff;
+    write_bytes[0x43] = 0x08 ^ read_data->data[4];
+    write_mask[0x43] = 0xff;
 
     memcpy(write_data->data, write_bytes, 256);
     legic_prime_event->write_data = write_data;
@@ -112,7 +105,7 @@ NfcCommand nfc_scene_legic_prime_set_0x44_worker_callback(NfcGenericEvent event,
   return command;
 }
 
-static void nfc_scene_legic_prime_set_0x44_setup_view(NfcApp *instance) {
+static void nfc_scene_legic_prime_set_0x43_setup_view(NfcApp *instance) {
   Popup *popup = instance->popup;
   popup_reset(popup);
 
@@ -123,21 +116,21 @@ static void nfc_scene_legic_prime_set_0x44_setup_view(NfcApp *instance) {
   view_dispatcher_switch_to_view(instance->view_dispatcher, NfcViewPopup);
 }
 
-void nfc_scene_legic_prime_set_0x44_on_enter(void *context) {
+void nfc_scene_legic_prime_set_0x43_on_enter(void *context) {
   NfcApp *instance = context;
   dolphin_deed(DolphinDeedNfcEmulate);
 
-  nfc_scene_legic_prime_set_0x44_setup_view(instance);
+  nfc_scene_legic_prime_set_0x43_setup_view(instance);
 
   // Setup and start worker
   instance->poller = nfc_poller_alloc(instance->nfc, NfcProtocolLegicPrime);
   nfc_poller_start(instance->poller,
-                   nfc_scene_legic_prime_set_0x44_worker_callback, instance);
+                   nfc_scene_legic_prime_set_0x43_worker_callback, instance);
 
   nfc_blink_emulate_start(instance);
 }
 
-bool nfc_scene_legic_prime_set_0x44_on_event(void *context,
+bool nfc_scene_legic_prime_set_0x43_on_event(void *context,
                                              SceneManagerEvent event) {
   NfcApp *instance = context;
   bool consumed = false;
@@ -145,11 +138,11 @@ bool nfc_scene_legic_prime_set_0x44_on_event(void *context,
   if (event.type == SceneManagerEventTypeCustom) {
     if (event.event == NfcCustomEventPollerSuccess) {
       scene_manager_next_scene(instance->scene_manager,
-                               NfcSceneLegicPrimeSet44Success);
+                               NfcSceneLegicPrimeSet43Success);
       consumed = true;
     } else if (event.event == NfcCustomEventPollerFailure) {
       scene_manager_next_scene(instance->scene_manager,
-                               NfcSceneLegicPrimeSet44Fail);
+                               NfcSceneLegicPrimeSet43Fail);
       consumed = true;
     }
   }
@@ -157,7 +150,7 @@ bool nfc_scene_legic_prime_set_0x44_on_event(void *context,
   return consumed;
 }
 
-void nfc_scene_legic_prime_set_0x44_on_exit(void *context) {
+void nfc_scene_legic_prime_set_0x43_on_exit(void *context) {
   NfcApp *instance = context;
 
   nfc_poller_stop(instance->poller);

@@ -31,6 +31,9 @@ static LegicPrimePoller *legic_prime_poller_alloc(Nfc *nfc) {
     nfc_set_fdt_poll_fc(instance->nfc, LEGIC_PRIME_FDT_POLL_FC);
     nfc_set_fdt_poll_poll_us(instance->nfc, LEGIC_PRIME_POLL_POLL_MIN_US);
 #else
+  LegicPrimePollerTrxData *trx_data = malloc(sizeof(LegicPrimePollerTrxData));
+  instance->trx_data = trx_data;
+
   nfc_set_guard_time_us(instance->nfc, 0);
   nfc_set_fdt_poll_fc(instance->nfc, 0);
   nfc_set_fdt_poll_poll_us(instance->nfc, 0);
@@ -49,14 +52,14 @@ static LegicPrimePoller *legic_prime_poller_alloc(Nfc *nfc) {
 static void legic_prime_poller_free(LegicPrimePoller *instance) {
   furi_assert(instance);
 
-  furi_assert(instance->tx_buffer);
-  furi_assert(instance->rx_buffer);
   furi_assert(instance->data);
+  furi_assert(instance->trx_data);
 
 #if 0
   bit_buffer_free(instance->tx_buffer);
   bit_buffer_free(instance->rx_buffer);
 #endif
+  free(instance->trx_data);
   legic_prime_free(instance->data);
   free(instance);
 }
@@ -73,6 +76,7 @@ static void legic_prime_poller_set_callback(LegicPrimePoller *instance,
 
 NfcCommand legic_prime_poller_state_handler_idle(LegicPrimePoller *instance) {
   FURI_LOG_D(TAG, "Idle");
+  NfcCommand command = NfcCommandContinue;
 
   LegicPrimeError error = legic_prime_poller_activate(instance, instance->data);
   instance->legic_prime_event_data.error = error;
@@ -87,9 +91,9 @@ NfcCommand legic_prime_poller_state_handler_idle(LegicPrimePoller *instance) {
   } else {
     instance->legic_prime_event.type = LegicPrimePollerEventTypeFail;
     instance->state = LegicPrimePollerStateReadFailed;
-    // command = NfcCommandStop;
+    command = NfcCommandStop;
   }
-  return NfcCommandContinue;
+  return command;
 }
 
 NfcCommand
@@ -113,38 +117,41 @@ NfcCommand
 legic_prime_poller_state_handler_read_blocks(LegicPrimePoller *instance) {
   FURI_LOG_D(TAG, "Read Blocks");
 
-  LegicPrimePollerTrxData *trx_data = malloc(sizeof(LegicPrimePollerTrxData));
-
+  LegicPrimePollerTrxData *trx_data = instance->trx_data;
   size_t tag_sz = instance->data->tag.cardsize;
   // instance->data->blocks_read = 0;
 
   memcpy(&trx_data->tag, &instance->data->tag, sizeof(LegicPrimeTag));
   trx_data->cmd = LegicPrimeCmdRead;
   trx_data->num_addrs = trx_data->tag.cardsize;
+  trx_data->bytes_processed = 0;
 
   for (size_t i = 0; i < tag_sz; i++) {
     trx_data->addrs[i] = i;
   }
 
-  LegicPrimeError error = legic_prime_poller_trx(instance, trx_data);
+  int retries = 100;
 
-  if (error == LegicPrimeErrorNone) {
-    uint8_t *data_ptr = instance->data->data;
-    uint8_t *response_data_ptr = trx_data->response_data;
+  do {
+    LegicPrimeError error = legic_prime_poller_trx(instance, trx_data);
 
-    // instance->data->blocks_read = trx_data->tag.cardsize;
-    memcpy(data_ptr, response_data_ptr, LEGIC_PRIME_DATA_BLOCK_SIZE);
+    if (error == LegicPrimeErrorNone) {
+      uint8_t *data_ptr = instance->data->data;
+      uint8_t *response_data_ptr = trx_data->response_data;
 
-    FURI_LOG_I(TAG, "Read %d bytes with %d retries", trx_data->bytes_processed,
-               trx_data->total_errors);
-    instance->state = LegicPrimePollerStateReadSuccess;
-  } else {
-    instance->legic_prime_event.type = LegicPrimePollerEventTypeFail;
-    instance->legic_prime_event_data.error = error;
-    instance->state = LegicPrimePollerStateReadFailed;
-  }
+      memcpy(data_ptr, response_data_ptr, LEGIC_PRIME_DATA_BLOCK_SIZE);
 
-  free(trx_data);
+      instance->state = LegicPrimePollerStateReadSuccess;
+      break;
+    } else {
+      instance->legic_prime_event.type = LegicPrimePollerEventTypeFail;
+      instance->legic_prime_event_data.error = error;
+      instance->state = LegicPrimePollerStateReadFailed;
+    }
+  } while (retries--);
+  FURI_LOG_I(TAG, "Read %d bytes with %d retries", trx_data->bytes_processed,
+             trx_data->total_errors);
+
   return NfcCommandContinue;
 }
 
@@ -152,12 +159,13 @@ NfcCommand
 legic_prime_poller_state_handler_write_blocks(LegicPrimePoller *instance) {
   FURI_LOG_D(TAG, "Write Blocks");
 
-  LegicPrimePollerTrxData *trx_data = malloc(sizeof(LegicPrimePollerTrxData));
+  LegicPrimePollerTrxData *trx_data = instance->trx_data;
 
   size_t tag_sz = instance->data->tag.cardsize;
 
   memcpy(&trx_data->tag, &instance->data->tag, sizeof(LegicPrimeTag));
   trx_data->cmd = LegicPrimeCmdWrite;
+  trx_data->bytes_processed = 0;
 
   size_t idx = 0;
 
@@ -175,19 +183,23 @@ legic_prime_poller_state_handler_write_blocks(LegicPrimePoller *instance) {
   }
   trx_data->num_addrs = idx;
 
-  LegicPrimeError error = legic_prime_poller_trx(instance, trx_data);
+  int retries = 100;
 
-  if (error == LegicPrimeErrorNone) {
-    FURI_LOG_I(TAG, "Wrote %d bytes with %d retries", trx_data->bytes_processed,
-               trx_data->total_errors);
-    instance->state = LegicPrimePollerStateWriteSuccess;
-  } else {
-    instance->legic_prime_event.type = LegicPrimePollerEventTypeFail;
-    instance->legic_prime_event_data.error = error;
-    instance->state = LegicPrimePollerStateWriteFailed;
-  }
+  do {
+    LegicPrimeError error = legic_prime_poller_trx(instance, trx_data);
 
-  free(trx_data);
+    if (error == LegicPrimeErrorNone) {
+      instance->state = LegicPrimePollerStateWriteSuccess;
+      break;
+    } else {
+      instance->legic_prime_event.type = LegicPrimePollerEventTypeFail;
+      instance->legic_prime_event_data.error = error;
+      instance->state = LegicPrimePollerStateWriteFailed;
+    }
+  } while (retries--);
+  FURI_LOG_I(TAG, "Wrote %d bytes with %d retries", trx_data->bytes_processed,
+             trx_data->total_errors);
+
   return NfcCommandContinue;
 }
 
@@ -202,6 +214,8 @@ legic_prime_poller_state_handler_read_success(LegicPrimePoller *instance) {
 NfcCommand
 legic_prime_poller_state_handler_read_failed(LegicPrimePoller *instance) {
   FURI_LOG_D(TAG, "Read Fail");
+  instance->legic_prime_event.type = LegicPrimePollerEventTypeFail;
+  instance->legic_prime_event_data.error = LegicPrimeErrorTimeout;
   instance->callback(instance->general_event, instance->context);
   return NfcCommandStop;
 }
@@ -252,6 +266,8 @@ static NfcCommand legic_prime_poller_run(NfcGenericEvent event, void *context) {
 
   if (nfc_event->type == NfcEventTypePollerReady) {
     command = legic_prime_poller_handler[instance->state](instance);
+  } else {
+    command = NfcCommandReset;
   }
 
   return command;

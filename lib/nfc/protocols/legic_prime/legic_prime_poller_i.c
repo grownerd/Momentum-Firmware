@@ -6,16 +6,6 @@
 
 #define TAG "LegicPrimePoller"
 
-#if 0
-static crc_t legic_crc;
-
-static uint8_t calc_crc4(uint16_t cmd, uint8_t cmd_sz, uint8_t value) {
-  crc_clear(&legic_crc);
-  crc_update(&legic_crc, (value << cmd_sz) | cmd, 8 + cmd_sz);
-  return crc_finish(&legic_crc);
-}
-#endif
-
 static LegicPrimeError legic_prime_poller_process_error(NfcError error) {
   switch (error) {
   case NfcErrorNone:
@@ -77,7 +67,7 @@ LegicPrimeError legic_prime_poller_activate(LegicPrimePoller *instance,
 
   LegicPrimeError ret;
 
-  LegicPrimePollerTrxData *trx_data = malloc(sizeof(LegicPrimePollerTrxData));
+  LegicPrimePollerTrxData *trx_data = instance->trx_data;
   memset(trx_data, 0, sizeof(LegicPrimePollerTrxData));
 
   do {
@@ -101,6 +91,5 @@ LegicPrimeError legic_prime_poller_activate(LegicPrimePoller *instance,
 
   } while (false);
 
-  free(trx_data);
   return ret;
 }

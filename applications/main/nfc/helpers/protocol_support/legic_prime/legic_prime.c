@@ -12,6 +12,8 @@
 
 enum {
   SubmenuIndexWrite = SubmenuIndexCommonMax,
+  SubmenuIndexWrite43,
+  SubmenuIndexWrite44,
 };
 
 static void nfc_scene_info_on_enter_legic_prime(NfcApp *instance) {
@@ -90,11 +92,14 @@ static void nfc_scene_read_success_on_enter_legic_prime(NfcApp *instance) {
 
 static void nfc_scene_read_menu_on_enter_legic_prime(NfcApp *instance) {
   Submenu *submenu = instance->submenu;
-  const LegicPrimeData *data =
-      nfc_device_get_data(instance->nfc_device, NfcProtocolLegicPrime);
+  // const LegicPrimeData *data =
+  //     nfc_device_get_data(instance->nfc_device, NfcProtocolLegicPrime);
 
-  if ((data->data[0x43] ^ data->data[4]) == 0x04) {
-    submenu_add_item(submenu, "Free Parking!", SubmenuIndexWrite,
+  // if ((data->data[0x43] ^ data->data[4]) == 0x04) {
+  if (1) {
+    submenu_add_item(submenu, "Set 0x43", SubmenuIndexWrite43,
+                     nfc_protocol_support_common_submenu_callback, instance);
+    submenu_add_item(submenu, "Set 0x44", SubmenuIndexWrite44,
                      nfc_protocol_support_common_submenu_callback, instance);
   }
 }
@@ -111,7 +116,12 @@ static bool nfc_scene_read_menu_on_event_legic_prime(NfcApp *instance,
   bool consumed = false;
 
   if (event.type == SceneManagerEventTypeCustom) {
-    if (event.event == SubmenuIndexWrite) {
+    if (event.event == SubmenuIndexWrite43) {
+      scene_manager_next_scene(instance->scene_manager,
+                               NfcSceneLegicPrimeSet43);
+      consumed = true;
+    }
+    if (event.event == SubmenuIndexWrite44) {
       scene_manager_next_scene(instance->scene_manager,
                                NfcSceneLegicPrimeSet44);
       consumed = true;

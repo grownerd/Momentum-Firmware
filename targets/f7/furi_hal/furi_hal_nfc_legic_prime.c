@@ -12,8 +12,7 @@
 
 #define TAG "FuriHalLegicPrime"
 
-#define BITS_IN_BYTE (8)
-#define POLLER_MAX_RX_ERRORS (10)
+#define POLLER_MAX_SETUP_RETRIES (10)
 #define POLLER_MAX_ANSWER_BITS (12)
 #define POLLER_BIT_DEBUG_BUFFER_SIZE (64)
 #define POLLER_SETUP_IV_VAL (0x55)
@@ -27,6 +26,8 @@
  * s/#define \(\w\+\) \((\d\+)\)\(.*\)/static volatile int32_t \1 = \2;\3/
  * s/static volatile int32_t \(\w\+\) = \((\d\+)\);/#define \1 \2/
  */
+static volatile int32_t POLLER_MAX_READ_RETRIES = (10);  // ~3.6ms
+static volatile int32_t POLLER_MAX_WRITE_RETRIES = (10); // ~3.6ms
 static volatile int32_t POLLER_WRITE_ACK_DELAY = (3540); // ~3.6ms
 static volatile int32_t POLLER_BIT_IRQ_COUNT = (80);
 static volatile int32_t POLLER_BIT_IRQ_COUNT_TOL = (20);
@@ -34,13 +35,15 @@ static volatile int32_t POLLER_ACK_PAUSE_READ = (142);
 static volatile int32_t POLLER_ACK_PAUSE_WRITE = (78);
 
 static volatile int32_t POLLER_RX_FWT_READ_T =
-    (21300); // ~1755us from the end of the poller's EOF bit to the start of the
+    (20850); // ~1755us from the end of the poller's EOF bit to the start of the
              // first bit in the next poller frame. To be able to read more than
              // one byte at a time (aka one byte per setup phase), this timing
-             // is crucial!
+             // is crucial! It seems that values >= 20400 and <= 21300 will work
+             // atm. To be safe, the value should be right in the middle of that
+             // range!
 static volatile int32_t POLLER_RX_FWT_WRITE_T =
     (50500); // ~4ms is what the pm3 does, so 4ms is what we do.
-static volatile int32_t POLLER_RX_FWT_ACK_T = (13500); // ~1155us
+static volatile int32_t POLLER_RX_FWT_ACK_T = (13400); // ~1155us
 static volatile int32_t POLLER_RX_LOOP_T = (95);
 static volatile int32_t POLLER_BIT_T_START_DELAY =
     (270); // 12bits * 100us loop time + 270us start delay == 1470us --> no more
@@ -102,7 +105,7 @@ static uint8_t calc_crc4(uint16_t cmd, uint8_t cmd_sz, uint8_t value) {
   return crc_finish(&legic_crc);
 }
 
-static bool p_poller_crc_good(uint16_t data, uint16_t cmd, size_t cmd_sz) {
+static bool p_poller_crc_good(uint16_t data, uint32_t cmd, size_t cmd_sz) {
 
   // split frame into data and crc
   uint8_t byte = data & 0xff;
@@ -371,7 +374,7 @@ static bool p_poller_read_byte(uint16_t addr, size_t cmd_sz) {
 static bool p_poller_write_byte(uint16_t addr, uint8_t data, size_t addr_sz) {
 
   uint32_t cmd = (addr << 1) | LegicPrimeCmdWrite;
-  uint16_t cmd_sz = addr_sz + 1 + 8 + 4; // cmd_sz = addr_sz + cmd + data + crc
+  size_t cmd_sz = addr_sz + 1 + 8 + 4; // cmd_sz = addr_sz + cmd + data + crc
 
   uint8_t crc = calc_crc4(cmd, addr_sz + 1, data); // calculate crc
   cmd |= data << (addr_sz + 1);                    // append value
@@ -386,27 +389,26 @@ static bool p_poller_write_byte(uint16_t addr, uint8_t data, size_t addr_sz) {
   return poller_rx_buf[addr];
 }
 
-#if 1
 static bool p_poller_recover_error(uint16_t addr, uint8_t data, size_t cmd_sz,
                                    LegicPrimeCmd cmd) {
-  uint8_t last_byte = 0;
-  for (int i = 0; i < 4; i++) {
-    if (cmd) {
-      if (!p_poller_read_byte(addr, cmd_sz))
-        return false;
-
-      if (i && (last_byte != poller_rx_buf[addr]))
-        return false;
+  if (cmd) {
+    uint8_t last_byte = 0;
+    for (int i = 0; i < POLLER_MAX_READ_RETRIES; i++) {
+      if (p_poller_read_byte(addr, cmd_sz)) {
+        if (i && (last_byte == poller_rx_buf[addr]))
+          return true;
+      }
 
       last_byte = poller_rx_buf[addr];
-    } else {
-      if (!p_poller_write_byte(addr, data, cmd_sz - 1))
-        return false;
+    }
+  } else {
+    for (int i = 0; i < POLLER_MAX_WRITE_RETRIES; i++) {
+      if (p_poller_write_byte(addr, data, cmd_sz - 1))
+        return true;
     }
   }
-  return true;
+  return false;
 }
-#endif
 
 /*
  * Private Listener functions
@@ -760,7 +762,21 @@ static FuriHalNfcError
 furi_hal_nfc_legic_prime_poller_init(const FuriHalSpiBusHandle *handle) {
 
   furi_check(legic_prime_signal == NULL);
+  furi_check(poller_rx_buf == NULL);
+
   legic_prime_signal = legic_prime_signal_alloc(&gpio_spi_r_mosi);
+
+  poller_rx_buf = malloc(sizeof(uint16_t) * 1024);
+  memset(poller_rx_buf, 0, 1024 * sizeof(uint16_t));
+
+  poller_ones_per_slot = malloc(sizeof(uint16_t) * POLLER_MAX_ANSWER_BITS);
+  memset(poller_ones_per_slot, 0, POLLER_MAX_ANSWER_BITS * sizeof(uint16_t));
+
+  poller_ones_before_start = 0;
+  irq_bits = 0;
+
+  // init crc calculator
+  crc_init(&legic_crc, 4, 0x19 >> 1, 0x05, 0);
 
   st25r3916_write_reg(handle, ST25R3916_REG_OP_CONTROL,
                       ST25R3916_REG_OP_CONTROL_en |
@@ -782,6 +798,14 @@ furi_hal_nfc_legic_prime_poller_deinit(const FuriHalSpiBusHandle *handle) {
   if (legic_prime_signal) {
     legic_prime_signal_free(legic_prime_signal);
     legic_prime_signal = NULL;
+  }
+  if (poller_rx_buf) {
+    free(poller_rx_buf);
+    poller_rx_buf = NULL;
+  }
+  if (poller_ones_per_slot) {
+    free(poller_ones_per_slot);
+    poller_ones_per_slot = NULL;
   }
 
   // This is the same as in the init cmd, which seems wrong.
@@ -928,49 +952,35 @@ furi_hal_nfc_legic_prime_poller_tx(const FuriHalSpiBusHandle *handle,
                                    const uint8_t *tx_data, size_t tx_bits) {
 
   furi_check(tx_data);
-  furi_check(legic_prime_signal);
   UNUSED(tx_bits);
-  furi_check(poller_rx_buf == NULL);
+  furi_check(legic_prime_signal);
+  furi_check(poller_rx_buf);
 
   LegicPrimePollerTrxData *trx_data = (LegicPrimePollerTrxData *)tx_data;
   FuriHalNfcError error = FuriHalNfcErrorNone;
-
-  // init crc calculator
-  crc_init(&legic_crc, 4, 0x19 >> 1, 0x05, 0);
-
-  poller_rx_buf = malloc(sizeof(uint16_t) * 1024);
-  memset(poller_rx_buf, 0, 1024 * sizeof(uint16_t));
-
-  poller_ones_per_slot = malloc(sizeof(uint16_t) * POLLER_MAX_ANSWER_BITS);
-  memset(poller_ones_per_slot, 0, POLLER_MAX_ANSWER_BITS * sizeof(uint16_t));
-  poller_ones_before_start = 0;
-  irq_bits = 0;
-
   p_enter_transparent(handle);
 
   do {
-    poller_tag_type = p_poller_setup(POLLER_MAX_RX_ERRORS);
+    poller_tag_type = p_poller_setup(POLLER_MAX_SETUP_RETRIES);
 
     // If no card is detected, we should return some kind of error!
     if (!poller_tag_type) {
-      error = FuriHalNfcErrorNone;
       break;
     }
 
     // If this is a tag detect command, return immediately after setup!
     if (!trx_data->tag.tagtype) {
-      error = FuriHalNfcErrorNone;
       break;
     }
 
     uint8_t cmd = trx_data->cmd;
     size_t tx_bytes = trx_data->num_addrs;
-    uint32_t error_cnt = 0;
+    uint32_t start_cnt = trx_data->bytes_processed;
     bool success = false;
     furi_delay_us(cmd == LegicPrimeCmdRead ? POLLER_ACK_PAUSE_READ
                                            : POLLER_ACK_PAUSE_WRITE);
 
-    for (size_t i = 0; i < tx_bytes; i++) {
+    for (size_t i = start_cnt; i < tx_bytes; i++) {
       if (cmd == LegicPrimeCmdRead) {
         success = p_poller_read_byte(trx_data->addrs[i], trx_data->tag.cmdsize);
       } else if (cmd == LegicPrimeCmdWrite) {
@@ -979,26 +989,12 @@ furi_hal_nfc_legic_prime_poller_tx(const FuriHalSpiBusHandle *handle,
                                 trx_data->tag.addrsize);
       }
 
-      if (success) {
-        error_cnt = 0;
+      if (success ||
+          p_poller_recover_error(trx_data->addrs[i], trx_data->write_data[i],
+                                 trx_data->tag.cmdsize, cmd)) {
         trx_data->bytes_processed++;
-        // } else {
-      } else if (!p_poller_recover_error(trx_data->addrs[i],
-                                         trx_data->write_data[i],
-                                         trx_data->tag.cmdsize, cmd)) {
-        i--;
-        error_cnt++;
+      } else {
         trx_data->total_errors++;
-      }
-      if (error_cnt > POLLER_MAX_RX_ERRORS) {
-        error = FuriHalNfcErrorIncompleteFrame;
-
-        if (poller_rx_buf) {
-          free(poller_rx_buf);
-          poller_rx_buf = NULL;
-          free(poller_ones_per_slot);
-          poller_ones_per_slot = NULL;
-        }
         break;
       }
     }
@@ -1015,10 +1011,9 @@ furi_hal_nfc_legic_prime_poller_rx(const FuriHalSpiBusHandle *handle,
                                    size_t *rx_bits) {
   UNUSED(handle);
   UNUSED(rx_data_size);
+  UNUSED(rx_bits);
 
   LegicPrimePollerTrxData *trx_data = (LegicPrimePollerTrxData *)rx_data;
-
-  FuriHalNfcError error = FuriHalNfcErrorNone;
 
   do {
     // If this is the answer to a tag detect command, return immediately.
@@ -1030,19 +1025,13 @@ furi_hal_nfc_legic_prime_poller_rx(const FuriHalSpiBusHandle *handle,
 
     for (size_t i = 0; i < trx_data->num_addrs; i++) {
       trx_data->response_data[i] = poller_rx_buf[i] & 0xff;
-      *rx_bits = i * BITS_IN_BYTE;
     }
 
   } while (false);
 
-  if (poller_rx_buf) {
-    free(poller_rx_buf);
-    poller_rx_buf = NULL;
-    free(poller_ones_per_slot);
-    poller_ones_per_slot = NULL;
-  }
-
-  return error;
+  return (trx_data->bytes_processed < trx_data->num_addrs)
+             ? FuriHalNfcErrorIncompleteFrame
+             : FuriHalNfcErrorNone;
 }
 
 const FuriHalNfcTechBase furi_hal_nfc_legic_prime = {

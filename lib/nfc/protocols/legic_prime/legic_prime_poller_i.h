@@ -27,8 +27,7 @@ struct LegicPrimePoller {
     LegicPrimePollerState state;
 
     LegicPrimeData* data;
-    BitBuffer* tx_buffer;
-    BitBuffer* rx_buffer;
+    LegicPrimePollerTrxData* trx_data;
 
     NfcGenericEvent general_event;
     LegicPrimePollerEvent legic_prime_event;
