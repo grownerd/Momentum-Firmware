@@ -64,6 +64,13 @@ nfc_scene_read_poller_callback_legic_prime(NfcGenericEvent event,
     view_dispatcher_send_custom_event(instance->view_dispatcher,
                                       NfcCustomEventPollerSuccess);
     return NfcCommandStop;
+
+  } else if (legic_prime_event->type == LegicPrimePollerEventTypeFail) {
+    nfc_device_set_data(instance->nfc_device, NfcProtocolLegicPrime,
+                        nfc_poller_get_data(instance->poller));
+    view_dispatcher_send_custom_event(instance->view_dispatcher,
+                                      NfcCustomEventPollerFailure);
+    return NfcCommandStop;
   }
 
   return NfcCommandContinue;
